@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# Docker / Logs
+*.log
+frontend/previews/*
+!frontend/previews/.gitkeep
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Application Data
+config.json
+grafana-storage/

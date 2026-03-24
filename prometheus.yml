@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'srt_gateway_cluster'
+    static_configs:
+      - targets: ['srt-gateway:8000', 'srt-gateway-backup:8000']

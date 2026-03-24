@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  srt-gateway:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000" # Web UI / API Primary
+      - "9000-9010:9000-9010/udp" # SRT Listener port block Primary
+    volumes:
+      - ./config.json:/app/config.json
+    tmpfs:
+      - /app/frontend/previews:size=500M
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ROLE=primary
+
+  srt-gateway-backup:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8001:8000" # Web UI / API Secondary 
+      - "9011-9021:9000-9010/udp" # SRT Listener port block Secondary via NAT shift
+    volumes:
+      - ./config.json:/app/config.json
+    tmpfs:
+      - /app/frontend/previews:size=500M
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ROLE=backup
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - srt-gateway
+      - srt-gateway-backup
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus

@@ -1,0 +1,139 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": "Prometheus",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Pipeline Target",
+        "multi": true,
+        "name": "ServiceName",
+        "options": [],
+        "query": "label_values(srt_stream_bitrate_kbps, service_name)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Primary Server: Active Routes",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [{ "expr": "srt_active_services{node=~\"primary|standalone\"}", "refId": "A" }],
+      "options": { "colorMode": "background", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-red", "value": null }, { "color": "green", "value": 1 } ] } } }
+    },
+    {
+      "type": "stat",
+      "title": "Primary Server: Crashed Routes",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "targets": [{ "expr": "srt_error_services{node=~\"primary|standalone\"}", "refId": "A" }],
+      "options": { "colorMode": "background", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-green", "value": null }, { "color": "red", "value": 1 } ] } } }
+    },
+    {
+      "type": "stat",
+      "title": "Backup Server: Active Routes",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "targets": [{ "expr": "srt_active_services{node=\"backup\"}", "refId": "A" }],
+      "options": { "colorMode": "background", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-red", "value": null }, { "color": "light-blue", "value": 1 } ] } } }
+    },
+    {
+      "type": "stat",
+      "title": "Backup Server: Crashed Routes",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "targets": [{ "expr": "srt_error_services{node=\"backup\"}", "refId": "A" }],
+      "options": { "colorMode": "background", "justifyMode": "auto" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-green", "value": null }, { "color": "red", "value": 1 } ] } } }
+    },
+    {
+      "type": "gauge",
+      "title": "Primary CPU",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 4 },
+      "id": 51,
+      "targets": [ { "expr": "srt_system_cpu_usage{node=~\"primary|standalone\"}", "legendFormat": "Usage", "refId": "A" } ],
+      "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "type": "gauge",
+      "title": "Primary RAM",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 4 },
+      "id": 52,
+      "targets": [ { "expr": "srt_system_memory_usage{node=~\"primary|standalone\"}", "legendFormat": "Usage", "refId": "A" } ],
+      "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-green", "value": null }, { "color": "dark-orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "type": "gauge",
+      "title": "Backup CPU",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 4 },
+      "id": 53,
+      "targets": [ { "expr": "srt_system_cpu_usage{node=\"backup\"}", "legendFormat": "Usage", "refId": "A" } ],
+      "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "light-blue", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "type": "gauge",
+      "title": "Backup RAM",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 4 },
+      "id": 54,
+      "targets": [ { "expr": "srt_system_memory_usage{node=\"backup\"}", "legendFormat": "Usage", "refId": "A" } ],
+      "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-blue", "value": null }, { "color": "dark-orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Live Processing Bitrate (Per Service)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
+      "id": 6,
+      "targets": [
+        { "expr": "srt_stream_bitrate_kbps{service_name=~\"^$ServiceName$\"}", "legendFormat": "{{service_name}} ({{node}})", "refId": "A" }
+      ],
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list", "placement": "bottom" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisPlacement": "left", "drawStyle": "line", "fillOpacity": 30, "lineWidth": 2 }, "unit": "kbps" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Continuity Drop Spikes / Stream Fragmentation (Per Service)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
+      "id": 7,
+      "targets": [
+        { "expr": "rate(srt_stream_cc_errors_total{service_name=~\"^$ServiceName$\"}[1m])", "legendFormat": "CC Errors / sec - {{service_name}} ({{node}})", "refId": "A" }
+      ],
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list", "placement": "bottom" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "axisPlacement": "left", "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 2 } } }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "title": "SRT Cluster Advanced Telemetry",
+  "uid": "srt_cluster",
+  "version": 7
+}

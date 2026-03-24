@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SRT Web Gateway</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-satellite-dish"></i>
+                <div>
+                   <h1>SRT Gateway</h1>
+                   <div id="nodeIdentity" style="font-size:0.75rem; color:var(--accent); font-weight:600; text-transform:uppercase; margin-top:2px;">Cluster Node</div>
+                </div>
+            </div>
+            <nav>
+                <ul>
+                    <li class="active"><i class="fa-solid fa-gauge"></i> Dashboard</li>
+                    <li><a href="/metrics" target="_blank" style="color:inherit;text-decoration:none;"><i class="fa-solid fa-chart-line"></i> Prometheus Metrics</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-title">
+                    <h2>Dashboard</h2>
+                    <p>Manage and preview your routing pipelines.</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-primary" onclick="openModal('createModal')">
+                        <i class="fa-solid fa-plus"></i> New Service
+                    </button>
+                </div>
+            </header>
+
+            <section class="services-table-wrapper">
+                <table class="services-table">
+                    <thead>
+                        <tr>
+                            <th>Status / Name</th>
+                            <th>Protocol / Mode</th>
+                            <th>Source Address</th>
+                            <th>Destination</th>
+                            <th>Input</th>
+                            <th>Encryption</th>
+                            <th>Live Preview</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="servicesList"></tbody>
+                </table>
+            </section>
+        </main>
+    </div>
+
+    <!-- Create/Edit Modal -->
+    <div class="modal-overlay" id="createModal">
+        <div class="modal" style="max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h3 id="modalTitle">Create New Service</h3>
+                <button class="close-btn" onclick="closeModal('createModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="serviceForm">
+                    <input type="hidden" id="serviceId">
+                    <div class="form-group">
+                        <label>Service Name</label>
+                        <input type="text" id="serviceName" required placeholder="e.g. Main Encoder feed">
+                    </div>
+
+                    <!-- Enhanced Source UI -->
+                    <div class="form-group-row">
+                        <div class="form-group">
+                            <label>Source Protocol</label>
+                            <select id="sourceProtocol" class="form-control-select">
+                                <option value="srt">SRT</option>
+                                <option value="rtmp">RTMP</option>
+                                <option value="udp">UDP</option>
+                                <option value="rist">RIST</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Source Mode</label>
+                            <select id="sourceMode" class="form-control-select">
+                                <option value="listener">Listener (Server bindings)</option>
+                                <option value="caller">Caller (Pull stream)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group-row">
+                        <div class="form-group">
+                            <label>Main Source IP</label>
+                            <input type="text" id="sourceIp" required placeholder="e.g. 0.0.0.0">
+                        </div>
+                        <div class="form-group">
+                            <label>Source Port</label>
+                            <input type="number" id="sourcePort" required placeholder="9000">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group-row">
+                        <div class="form-group">
+                            <label>Backup Source IP (Optional)</label>
+                            <input type="text" id="backupInputIp" placeholder="e.g. 192.168.1.5">
+                        </div>
+                        <div class="form-group" style="display:flex; align-items:flex-end;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--border); padding: 0 14px; border-radius: 6px; background: var(--bg-dark);">
+                                <input type="checkbox" id="autoFailover">
+                                <span style="font-weight:600; color:var(--accent);">Auto Feed Failover</span>
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--border); padding: 0 14px; border-radius: 6px; background: var(--bg-dark); margin-left:6px;" title="Agreesively monitors logs for PMT/CC missing errors">
+                                <input type="checkbox" id="strictProbing">
+                                <span style="font-weight:600; color:var(--danger);">Strict Heath Probing</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group-row">
+                        <div class="form-group" style="display:flex; align-items:flex-end;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--primary); padding: 0 14px; border-radius: 6px; background: rgba(94, 106, 210, 0.1);">
+                                <input type="checkbox" id="enableHlsPreview">
+                                <span style="font-weight:600; color:var(--primary);"><i class="fa-solid fa-satellite-dish"></i> Enable 360p HLS External URL</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="rtmpPathGroup">
+                        <label>Source Path (RTMP Only)</label>
+                        <input type="text" id="sourcePath" placeholder="/live/stream">
+                    </div>
+
+                    <div class="form-group-row" id="hardwareNodeRow">
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label>Destination URL</label>
+                            <input type="text" id="destinationUrl" required placeholder="e.g. rtmp://youtube/live2/KEY">
+                        </div>
+                        <div class="form-group" id="hardwareNodeGroup">
+                            <label>Hardware Exec Node (Cluster HA)</label>
+                            <select id="targetNode" class="form-control-select">
+                                <option value="primary">Primary Server Only</option>
+                                <option value="backup">Backup Server Only</option>
+                                <option value="all">Active-Active (Run on Both)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <hr style="border-color: var(--border); margin: 10px 0;">
+                    <div style="cursor: pointer; color: var(--primary); font-weight: 500; font-size: 0.9rem;" onclick="document.getElementById('advancedOptions').style.display = document.getElementById('advancedOptions').style.display === 'none' ? 'flex' : 'none'">
+                        <i class="fa-solid fa-sliders"></i> Toggle Advanced Settings (Encryption, NIC Bindings)
+                    </div>
+                    
+                    <div id="advancedOptions" style="display: none; margin-top: 16px; flex-direction: column; gap: 16px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                        
+                        <div class="form-group-row">
+                            <div class="form-group">
+                                <label>Local Network Bind Interface (IP)</label>
+                                <input type="text" id="localBindIp" placeholder="e.g. 192.168.1.5">
+                            </div>
+                            <div class="form-group">
+                                <label>SRT Latency (ms)</label>
+                                <input type="number" id="latencyMs" placeholder="e.g. 120">
+                            </div>
+                        </div>
+
+                        <div class="form-group-row">
+                            <div class="form-group">
+                                <label>SRT Passphrase (Encryption)</label>
+                                <input type="text" id="passphrase" placeholder="Secret Key">
+                            </div>
+                            <div class="form-group">
+                                <label>SRT Key Size</label>
+                                <select id="pbkeylen" class="form-control-select">
+                                    <option value="0">None</option>
+                                    <option value="16">16 Bytes (128-bit)</option>
+                                    <option value="24">24 Bytes (192-bit)</option>
+                                    <option value="32">32 Bytes (256-bit)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>SRT Stream ID</label>
+                            <input type="text" id="streamid" placeholder="Routing ID">
+                        </div>
+
+                        <!-- Removed Caller Whitelists array -->
+
+                    </div>
+
+                    <div class="form-actions" style="margin-top: 16px;">
+                        <button type="button" class="btn-secondary" onclick="closeModal('createModal')">Cancel</button>
+                        <button type="submit" class="btn-primary">Save Service</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <style>
+        .form-control-select {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            outline: none;
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  srt-gateway:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000" # Web UI / API
+      - "9000-9010:9000-9010/udp" # SRT Listener port block
+    volumes:
+      - ./config.json:/app/config.json
+    tmpfs:
+      - /app/frontend/previews:size=500M
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NODE_ROLE=standalone
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+volumes:
+  grafana-storage:
