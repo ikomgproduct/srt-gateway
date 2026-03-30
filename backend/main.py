@@ -50,6 +50,7 @@ async def hardware_metrics_loop():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(manager.cluster_sync_loop())
+    asyncio.create_task(manager.watchdog_loop())
     asyncio.create_task(hardware_metrics_loop())
 
 @app.get("/api/node_role")

@@ -88,6 +88,18 @@ class StreamManager:
                 except Exception as e:
                     logger.error(f"Cluster synchronization failure: {e}")
 
+    async def watchdog_loop(self):
+        """Monitors explicitly enabled pipelines and autonomously recovers them if they crashed."""
+        while True:
+            await asyncio.sleep(15)
+            for service_id, state in list(self.services.items()):
+                if getattr(state.config, 'enabled', False):
+                    if state.config.target_node in ["all", self.node_role] or self.node_role == "standalone":
+                        if state.status in ["error", "stopped"]:
+                            logger.warning(f"[WATCHDOG] Pipeline {service_id} connection dropped or crashed! Executing graceful auto-recovery...")
+                            use_backup = (state.active_input == "backup")
+                            asyncio.create_task(self.start_service(service_id, use_backup))
+
     def add_service(self, config: ServiceConfig) -> ServiceState:
         if config.id in self.services:
             raise ValueError("Service ID already exists")
