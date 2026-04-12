@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=srt_user
+      - POSTGRES_PASSWORD=srt_pass
+      - POSTGRES_DB=srt_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:alpine
+    command: redis-server --appendonly yes
+    restart: always
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://srt_user:srt_pass@db:5432/srt_db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - shared_previews:/app/frontend/previews
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build: .
+    command: python -m worker.worker
+    restart: unless-stopped
+    ports:
+      - "9000-9010:9000-9010/udp"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - NODE_ROLE=worker_1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - shared_previews:/app/frontend/previews
+    depends_on:
+      - redis
+
+  telemetry:
+    build: .
+    command: python -m telemetry.main
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - redis
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    depends_on:
+      - telemetry
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - telemetry
+
+volumes:
+  pgdata:
+  grafana-storage:
+  shared_previews:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=500m,uid=1000

@@ -25,83 +25,43 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Primary Server: Active Routes",
+      "title": "Total Active Network Routes",
       "datasource": "Prometheus",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 },
       "id": 1,
-      "targets": [{ "expr": "srt_active_services{node=~\"primary|standalone\"}", "refId": "A" }],
+      "targets": [{ "expr": "sum(srt_active_services)", "refId": "A" }],
       "options": { "colorMode": "background", "justifyMode": "auto" },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-red", "value": null }, { "color": "green", "value": 1 } ] } } }
     },
     {
       "type": "stat",
-      "title": "Primary Server: Crashed Routes",
+      "title": "Total Crashed Network Routes",
       "datasource": "Prometheus",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
       "id": 2,
-      "targets": [{ "expr": "srt_error_services{node=~\"primary|standalone\"}", "refId": "A" }],
-      "options": { "colorMode": "background", "justifyMode": "auto" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-green", "value": null }, { "color": "red", "value": 1 } ] } } }
-    },
-    {
-      "type": "stat",
-      "title": "Backup Server: Active Routes",
-      "datasource": "Prometheus",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "id": 3,
-      "targets": [{ "expr": "srt_active_services{node=\"backup\"}", "refId": "A" }],
-      "options": { "colorMode": "background", "justifyMode": "auto" },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-red", "value": null }, { "color": "light-blue", "value": 1 } ] } } }
-    },
-    {
-      "type": "stat",
-      "title": "Backup Server: Crashed Routes",
-      "datasource": "Prometheus",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "id": 4,
-      "targets": [{ "expr": "srt_error_services{node=\"backup\"}", "refId": "A" }],
+      "targets": [{ "expr": "sum(srt_error_services)", "refId": "A" }],
       "options": { "colorMode": "background", "justifyMode": "auto" },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-green", "value": null }, { "color": "red", "value": 1 } ] } } }
     },
     {
       "type": "gauge",
-      "title": "Primary CPU",
+      "title": "Cluster Active CPU Matrix (Per Node)",
       "datasource": "Prometheus",
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 4 },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 4 },
       "id": 51,
-      "targets": [ { "expr": "srt_system_cpu_usage{node=~\"primary|standalone\"}", "legendFormat": "Usage", "refId": "A" } ],
+      "targets": [ { "expr": "srt_system_cpu_usage", "legendFormat": "{{node}}", "refId": "A" } ],
       "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
     },
     {
       "type": "gauge",
-      "title": "Primary RAM",
+      "title": "Cluster Active RAM Matrix (Per Node)",
       "datasource": "Prometheus",
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 4 },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 4 },
       "id": 52,
-      "targets": [ { "expr": "srt_system_memory_usage{node=~\"primary|standalone\"}", "legendFormat": "Usage", "refId": "A" } ],
+      "targets": [ { "expr": "srt_system_memory_usage", "legendFormat": "{{node}}", "refId": "A" } ],
       "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
       "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-green", "value": null }, { "color": "dark-orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
-    },
-    {
-      "type": "gauge",
-      "title": "Backup CPU",
-      "datasource": "Prometheus",
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 4 },
-      "id": 53,
-      "targets": [ { "expr": "srt_system_cpu_usage{node=\"backup\"}", "legendFormat": "Usage", "refId": "A" } ],
-      "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "light-blue", "value": null }, { "color": "orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
-    },
-    {
-      "type": "gauge",
-      "title": "Backup RAM",
-      "datasource": "Prometheus",
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 4 },
-      "id": 54,
-      "targets": [ { "expr": "srt_system_memory_usage{node=\"backup\"}", "legendFormat": "Usage", "refId": "A" } ],
-      "options": { "reduceOptions": { "values": false, "calcs": [ "lastNotNull" ], "fields": "" }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
-      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "dark-blue", "value": null }, { "color": "dark-orange", "value": 70 }, { "color": "red", "value": 90 } ] }, "unit": "percent", "min": 0, "max": 100 } }
     },
     {
       "type": "timeseries",
