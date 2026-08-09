@@ -4,8 +4,10 @@ import json
 import logging
 import time
 import re
+import uuid
 import redis.asyncio as redis
 from backend.models import ServiceConfig
+from backend.ffmpeg_builder import build_ffmpeg_command, build_input_url
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -14,16 +16,29 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost")
 NODE_ROLE = os.getenv("NODE_ROLE", "worker_1")
 PREVIEW_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "previews")
 os.makedirs(PREVIEW_DIR, exist_ok=True)
+DESIRED_CONFIGS_KEY = "service_configs"
+HEARTBEAT_PREFIX = "worker_heartbeat:"
+LEASE_PREFIX = "stream_lease:"
+
+def should_run_on_node(config: ServiceConfig, node_role: str) -> bool:
+    if config.ha_mode == "active_passive":
+        return node_role in [config.target_node, config.failover_node]
+    return config.target_node in ["all", node_role]
 
 class WorkerNode:
     def __init__(self):
         self.redis = redis.from_url(REDIS_URL)
         self.processes = {}
         self.state = {}
+        self.lease_tokens = {}
+        self.first_seen = {}
         
     async def run(self):
         pubsub = self.redis.pubsub()
         await pubsub.subscribe("stream_commands")
+        asyncio.create_task(self.heartbeat_loop())
+        asyncio.create_task(self.reconcile_loop())
+        asyncio.create_task(self.lease_guard_loop())
         asyncio.create_task(self.metrics_loop())
         asyncio.create_task(self.watchdog_loop())
         asyncio.create_task(self.hardware_loop())
@@ -37,25 +52,134 @@ class WorkerNode:
                     
                     if action == "start":
                         config = ServiceConfig(**data["config"])
-                        if config.target_node in ["all", NODE_ROLE] or NODE_ROLE.startswith("worker"):
-                            use_backup = data.get("use_backup", False)
-                            asyncio.create_task(self.start_service(config, use_backup))
+                        asyncio.create_task(self.reconcile_service(config, data.get("use_backup", False)))
                             
                     elif action == "stop":
                         service_id = data.get("id")
-                        if service_id in self.processes:
-                            # Un-track locally
-                            if service_id in self.state:
-                                self.state[service_id]["enabled"] = False
-                            asyncio.create_task(self.stop_service(service_id))
+                        if service_id in self.state:
+                            self.state[service_id]["enabled"] = False
+                        asyncio.create_task(self.stop_service(service_id))
                 except Exception as e:
                     logger.error(f"Worker Queue Error: {e}")
+
+    async def heartbeat_loop(self):
+        while True:
+            try:
+                await self.redis.set(f"{HEARTBEAT_PREFIX}{NODE_ROLE}", str(time.time()), ex=10)
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+            await asyncio.sleep(3)
+
+    async def reconcile_loop(self):
+        while True:
+            try:
+                configs = await self.redis.hgetall(DESIRED_CONFIGS_KEY)
+                desired_ids = set()
+                for raw_id, raw_config in configs.items():
+                    service_id = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+                    desired_ids.add(service_id)
+                    payload = raw_config.decode() if isinstance(raw_config, bytes) else raw_config
+                    config = ServiceConfig(**json.loads(payload))
+                    await self.reconcile_service(config)
+
+                for service_id in list(self.state.keys()):
+                    if service_id not in desired_ids:
+                        self.state[service_id]["enabled"] = False
+                        await self.stop_service(service_id)
+            except Exception as e:
+                logger.error(f"Reconcile error: {e}")
+            await asyncio.sleep(5)
+
+    async def reconcile_service(self, config: ServiceConfig, use_backup: bool = False):
+        self.first_seen.setdefault(config.id, time.time())
+        if not config.enabled or not should_run_on_node(config, NODE_ROLE):
+            if config.id in self.processes:
+                await self.stop_service(config.id)
+            return
+
+        if config.ha_mode == "active_passive":
+            owns_lease = await self.ensure_active_passive_lease(config)
+            if not owns_lease:
+                if config.id in self.processes:
+                    await self.stop_service(config.id)
+                return
+
+        if config.id in self.processes and self.processes[config.id].returncode is None:
+            self.state[config.id]["config"] = config
+            self.state[config.id]["enabled"] = True
+            return
+
+        await self.start_service(config, use_backup)
+
+    async def preferred_node_is_healthy(self, config: ServiceConfig) -> bool:
+        if config.target_node == NODE_ROLE:
+            return True
+        return bool(await self.redis.exists(f"{HEARTBEAT_PREFIX}{config.target_node}"))
+
+    async def ensure_active_passive_lease(self, config: ServiceConfig) -> bool:
+        token = self.lease_tokens.get(config.id)
+        lease_key = f"{LEASE_PREFIX}{config.id}"
+        ttl = max(config.failover_after_seconds, 5)
+
+        if token:
+            current = await self.redis.get(lease_key)
+            current = current.decode() if isinstance(current, bytes) else current
+            if current == token:
+                await self.redis.expire(lease_key, ttl)
+                return True
+            self.lease_tokens.pop(config.id, None)
+
+        if NODE_ROLE != config.target_node:
+            seen_for = time.time() - self.first_seen.get(config.id, time.time())
+            if await self.preferred_node_is_healthy(config) or seen_for < ttl:
+                return False
+
+        token = f"{NODE_ROLE}:{uuid.uuid4()}"
+        acquired = await self.redis.set(lease_key, token, nx=True, ex=ttl)
+        if acquired:
+            self.lease_tokens[config.id] = token
+            logger.warning(f"[HA] {NODE_ROLE} acquired lease for {config.id}")
+            return True
+        return False
+
+    async def owns_lease(self, service_id: str) -> bool:
+        token = self.lease_tokens.get(service_id)
+        if not token:
+            return False
+        current = await self.redis.get(f"{LEASE_PREFIX}{service_id}")
+        current = current.decode() if isinstance(current, bytes) else current
+        return current == token
+
+    async def release_lease(self, service_id: str):
+        token = self.lease_tokens.pop(service_id, None)
+        if not token:
+            return
+        current = await self.redis.get(f"{LEASE_PREFIX}{service_id}")
+        current = current.decode() if isinstance(current, bytes) else current
+        if current == token:
+            await self.redis.delete(f"{LEASE_PREFIX}{service_id}")
+
+    async def lease_guard_loop(self):
+        while True:
+            try:
+                for sid, details in list(self.state.items()):
+                    config = details["config"]
+                    if config.ha_mode == "active_passive" and sid in self.processes:
+                        if not await self.owns_lease(sid):
+                            logger.warning(f"[HA] Lease lost for {sid}; stopping local pipeline")
+                            await self.stop_service(sid)
+            except Exception as e:
+                logger.error(f"Lease guard error: {e}")
+            await asyncio.sleep(2)
                         
     async def watchdog_loop(self):
         while True:
             await asyncio.sleep(15)
             for sid, details in list(self.state.items()):
                 if details.get("enabled") and details.get("status") in ["error", "stopped"]:
+                    config = details["config"]
+                    if config.ha_mode == "active_passive" and not await self.owns_lease(sid):
+                        continue
                     logger.warning(f"[WATCHDOG] Recovering {sid}")
                     use_backup = (details["active_input"] == "backup")
                     asyncio.create_task(self.start_service(details["config"], use_backup))
@@ -95,7 +219,7 @@ class WorkerNode:
             except Exception as e:
                 logger.error(f"Metrics Pub Error: {e}")
 
-    async def stop_service(self, service_id: str):
+    async def stop_service(self, service_id: str, release_lease: bool = True):
         if service_id in self.processes:
             p = self.processes[service_id]
             try:
@@ -104,9 +228,11 @@ class WorkerNode:
             del self.processes[service_id]
             if service_id in self.state:
                 self.state[service_id]["status"] = "stopped"
+        if release_lease:
+            await self.release_lease(service_id)
 
     async def start_service(self, config: ServiceConfig, use_backup: bool = False):
-        await self.stop_service(config.id)
+        await self.stop_service(config.id, release_lease=False)
         
         self.state[config.id] = {
             "config": config,
@@ -118,49 +244,10 @@ class WorkerNode:
             "enabled": True
         }
         
-        input_ip = config.backup_input_ip if use_backup and config.backup_input_ip else config.source_ip
-        
-        if config.source_protocol == "srt":
-            input_url = f"srt://{input_ip}:{config.source_port}?mode={config.source_mode}&timeout=5000000"
-            if config.local_bind_ip: input_url += f"&localbind={config.local_bind_ip}"
-            if config.latency_ms: input_url += f"&latency={config.latency_ms}"
-            if config.passphrase: input_url += f"&passphrase={config.passphrase}"
-            if config.pbkeylen: input_url += f"&pbkeylen={config.pbkeylen}"
-            if config.streamid: input_url += f"&streamid={config.streamid}"
-        elif config.source_protocol == "udp":
-            input_url = f"udp://{input_ip}:{config.source_port}?timeout=5000000"
-        elif config.source_protocol == "rist":
-            input_url = f"rist://{input_ip}:{config.source_port}?timeout=5"
-        else:
-            input_url = f"rtmp://{input_ip}:{config.source_port}{config.source_path or ''}"
-
         preview_dir = os.path.join(PREVIEW_DIR, config.id)
         os.makedirs(preview_dir, exist_ok=True)
-        preview_path = os.path.join(preview_dir, "preview.jpg")
-
-        ffmpeg_cmd = [
-            "ffmpeg", "-hide_banner", "-y", "-progress", "pipe:2",
-            "-i", input_url,
-            "-map", "0:v?", "-map", "0:a?", "-c:v", "copy", "-c:a", "copy", "-f", "mpegts", config.destination_url,
-            "-map", "0:v:0?", "-r", "1", "-update", "1", preview_path
-        ]
-
-        if getattr(config, 'enable_hls_preview', False):
-            ffmpeg_cmd.extend(["-map", "0:v:0?", "-map", "0:a:0?"])
-            hw_accel = os.getenv("HW_ACCEL", "cpu")
-            if hw_accel == "nvidia":
-                ffmpeg_cmd.extend(["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll"])
-            else:
-                ffmpeg_cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-threads", "auto"])
-                
-            ffmpeg_cmd.extend([
-                "-b:v", "400k", "-maxrate", "400k", "-bufsize", "800k", "-vf", "scale=-2:360",
-                "-c:a", "aac", "-b:a", "64k", "-f", "hls", "-hls_time", "2", "-hls_list_size", "3", "-hls_flags", "delete_segments",
-                os.path.join(preview_dir, "stream.m3u8")
-            ])
-
-        if ffmpeg_cmd[-9] == "auto" or ffmpeg_cmd[-9] == "-f":
-            pass # Keep offsets aligned cleanly
+        input_url = build_input_url(config, use_backup, NODE_ROLE)
+        ffmpeg_cmd = build_ffmpeg_command(config, input_url, preview_dir)
 
         self.processes[config.id] = await asyncio.create_subprocess_exec(
             *ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE

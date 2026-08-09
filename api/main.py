@@ -3,25 +3,55 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import text
 import os
 import json
 import asyncio
 import redis.asyncio as redis
-from api.database import engine, Base, get_db
+from api.database import engine, Base, get_db, AsyncSessionLocal
 from api.models import ServiceModel
+from api.schemas import ServiceConfigRequest
 
 app = FastAPI(title="SRT API Gateway (Control Plane)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 redis_client = None
 
+DESIRED_CONFIGS_KEY = "service_configs"
+
+async def ensure_schema_columns():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        if conn.dialect.name == "postgresql":
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS ha_mode VARCHAR DEFAULT 'manual'"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS failover_node VARCHAR"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS failover_after_seconds INTEGER DEFAULT 15"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS failback_policy VARCHAR DEFAULT 'manual'"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS node_bindings JSONB"))
+
+def service_to_dict(service: ServiceModel) -> dict:
+    data = service.__dict__.copy()
+    data.pop("_sa_instance_state", None)
+    return data
+
+async def sync_desired_config(service_id: str, config: dict | None):
+    if not redis_client:
+        return
+    if config is None:
+        await redis_client.hdel(DESIRED_CONFIGS_KEY, service_id)
+    else:
+        await redis_client.hset(DESIRED_CONFIGS_KEY, service_id, json.dumps(config))
+
 @app.on_event("startup")
 async def startup():
     global redis_client
     # Automatically generate Database Tables natively avoiding Alembic migrations for standalone deployments
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await ensure_schema_columns()
     redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost"))
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(ServiceModel))
+        for service in result.scalars().all():
+            await sync_desired_config(service.id, service_to_dict(service))
     asyncio.create_task(hardware_metrics_loop())
 
 @app.on_event("shutdown")
@@ -66,28 +96,34 @@ async def get_services(db: AsyncSession = Depends(get_db)):
     return out
 
 @app.post("/api/services")
-async def create_service(config: dict, db: AsyncSession = Depends(get_db)):
+async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
     import uuid
-    if not config.get("id"):
-        config["id"] = str(uuid.uuid4())
-    db_item = ServiceModel(**config)
+    data = config.model_dump()
+    if not data.get("id"):
+        data["id"] = str(uuid.uuid4())
+    db_item = ServiceModel(**data)
     db.add(db_item)
     await db.commit()
     
-    if config.get("enabled"):
-        await redis_client.publish("stream_commands", json.dumps({"action": "start", "config": config}))
-    return config
+    if data.get("enabled"):
+        await sync_desired_config(data["id"], data)
+        await redis_client.publish("stream_commands", json.dumps({"action": "start", "config": data}))
+    else:
+        await sync_desired_config(data["id"], data)
+    return data
 
 @app.put("/api/services/{service_id}")
-async def update_service(service_id: str, config: dict, db: AsyncSession = Depends(get_db)):
-    config["id"] = service_id
-    await db.merge(ServiceModel(**config))
+async def update_service(service_id: str, config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
+    data = config.model_dump()
+    data["id"] = service_id
+    await db.merge(ServiceModel(**data))
     await db.commit()
     
+    await sync_desired_config(service_id, data)
     await redis_client.publish("stream_commands", json.dumps({"action": "stop", "id": service_id}))
-    if config.get("enabled"):
-        await redis_client.publish("stream_commands", json.dumps({"action": "start", "config": config}))
-    return config
+    if data.get("enabled"):
+        await redis_client.publish("stream_commands", json.dumps({"action": "start", "config": data}))
+    return data
 
 @app.delete("/api/services/{service_id}")
 async def delete_service(service_id: str, db: AsyncSession = Depends(get_db)):
@@ -95,6 +131,7 @@ async def delete_service(service_id: str, db: AsyncSession = Depends(get_db)):
     if item:
         await db.delete(item)
         await db.commit()
+    await sync_desired_config(service_id, None)
     await redis_client.publish("stream_commands", json.dumps({"action": "stop", "id": service_id}))
     return {"status": "deleted"}
 
@@ -107,6 +144,7 @@ async def start_service(service_id: str, use_backup: bool = False, db: AsyncSess
     
     d = item.__dict__.copy()
     d.pop("_sa_instance_state", None)
+    await sync_desired_config(service_id, d)
     await redis_client.publish("stream_commands", json.dumps({
         "action": "start", 
         "config": d, 
@@ -120,6 +158,7 @@ async def stop_service(service_id: str, db: AsyncSession = Depends(get_db)):
     if not item: raise HTTPException(404)
     item.enabled = False
     await db.commit()
+    await sync_desired_config(service_id, service_to_dict(item))
     
     await redis_client.publish("stream_commands", json.dumps({"action": "stop", "id": service_id}))
     return {"status": "stopped"}

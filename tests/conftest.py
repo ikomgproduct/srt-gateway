@@ -35,9 +35,18 @@ async def async_client():
 @pytest.fixture(autouse=True)
 def mock_redis(monkeypatch):
     class DummyRedis:
+        def __init__(self):
+            self.hashes = {}
+
         async def close(self): pass
         async def publish(self, channel, message): return 1
         async def hget(self, name, key): return None
+        async def hset(self, name, key, value):
+            self.hashes.setdefault(name, {})[key] = value
+            return 1
+        async def hdel(self, name, key):
+            self.hashes.setdefault(name, {}).pop(key, None)
+            return 1
         
     import api.main
     monkeypatch.setattr(api.main, "redis_client", DummyRedis())

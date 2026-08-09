@@ -4,6 +4,7 @@ import json
 import os
 from typing import Dict, Optional
 from backend.models import ServiceConfig, ServiceState, StreamStatus
+from backend.ffmpeg_builder import build_ffmpeg_command, build_input_url
 from prometheus_client import Gauge, Counter
 import re
 
@@ -138,110 +139,11 @@ class StreamManager:
                 
         preview_path = os.path.join(preview_dir, "preview.jpg")
 
-        protocol = state.config.source_protocol
-        
-        base_src_ip = state.config.backup_input_ip if (use_backup and state.config.backup_input_ip) else state.config.source_ip
-        
-        clean_ip = base_src_ip
-        for prefix in ["srt://", "rtmp://", "http://", "udp://", "rist://"]:
-            if clean_ip.startswith(prefix):
-                clean_ip = clean_ip[len(prefix):]
-        if "/" in clean_ip:
-            clean_ip = clean_ip.split("/")[0]
-
-        advanced_params = []
-        
-        if protocol in ["srt", "rtmp", "rist"]:
-            advanced_params.append("rw_timeout=5000000")
-            
-        if state.config.latency_ms:
-            advanced_params.append(f"latency={state.config.latency_ms}")
-        if state.config.passphrase:
-            advanced_params.append(f"passphrase={state.config.passphrase}")
-            if state.config.pbkeylen:
-                advanced_params.append(f"pbkeylen={state.config.pbkeylen}")
-        if state.config.streamid:
-            advanced_params.append(f"streamid={state.config.streamid}")
-            
-        advanced_query = "&".join(advanced_params) if advanced_params else ""
-
-        if protocol == "srt":
-            query = f"?mode={state.config.source_mode}"
-            if advanced_query:
-                query += f"&{advanced_query}"
-            
-            if state.config.local_bind_ip and state.config.source_mode == "caller":
-                query += f"&localaddr={state.config.local_bind_ip}"
-            elif state.config.local_bind_ip and state.config.source_mode == "listener":
-                clean_ip = state.config.local_bind_ip
-                
-            input_url = f"srt://{clean_ip}:{state.config.source_port}{query}"
-
-        elif protocol == "udp":
-            query = "?timeout=5000000"
-            if state.config.local_bind_ip:
-                query += f"&localaddr={state.config.local_bind_ip}"
-            input_url = f"udp://{clean_ip}:{state.config.source_port}{query}"
-
-        elif protocol == "rist":
-            prefix = "@" if state.config.source_mode == "listener" else ""
-            rist_params = ["rist_profile=main", "rw_timeout=5000000"]
-            if state.config.latency_ms:
-                rist_params.append(f"buffer_size={state.config.latency_ms}")
-            if state.config.passphrase:
-                rist_params.append(f"secret={state.config.passphrase}")
-            query = "?" + "&".join(rist_params)
-            input_url = f"rist://{prefix}{clean_ip}:{state.config.source_port}{query}"
-
-        else: # rtmp
-            path = state.config.source_path if state.config.source_path else ""
-            input_url = f"rtmp://{clean_ip}:{state.config.source_port}{path}?rw_timeout=5000000"
-            if state.config.source_mode == "listener":
-                input_url += "&listen=1"
+        input_url = build_input_url(state.config, use_backup, self.node_role)
 
         logger.info(f"Connecting Active {state.active_input.upper()} Feed to stream orchestrator: {input_url}")
 
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-hide_banner",
-            "-y",
-            "-progress", "pipe:2",
-            "-i", input_url,
-            # Output 1: Delivery
-            "-map", "0:v?",
-            "-map", "0:a?",
-            "-c:v", "copy",
-            "-c:a", "copy",
-            "-f", "flv" if "rtmp://" in state.config.destination_url else ("mpegts" if "srt://" in state.config.destination_url else "auto"),
-            state.config.destination_url,
-            # Output 2: Native Thumbnail Slideshow
-            "-map", "0:v:0?",
-            "-r", "1",
-            "-update", "1",
-            preview_path
-        ]
-
-        if getattr(state.config, 'enable_hls_preview', False):
-            # Output 3: HLS Transcoding Pipeline (360p)
-            ffmpeg_cmd.extend(["-map", "0:v:0?", "-map", "0:a:0?"])
-            hw_accel = os.getenv("HW_ACCEL", "cpu")
-            if hw_accel == "nvidia":
-                ffmpeg_cmd.extend(["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll"])
-            else:
-                ffmpeg_cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-threads", "auto"])
-                
-            ffmpeg_cmd.extend([
-                "-b:v", "400k", "-maxrate", "400k", "-bufsize", "800k",
-                "-vf", "scale=-2:360",
-                "-c:a", "aac", "-b:a", "64k",
-                "-f", "hls", "-hls_time", "2", "-hls_list_size", "3", "-hls_flags", "delete_segments",
-                os.path.join(preview_dir, "stream.m3u8")
-            ])
-        
-        # Remove empty format tags
-        if ffmpeg_cmd[-9] == "auto" or ffmpeg_cmd[-9] == "-f":
-            ffmpeg_cmd.pop(-9)
-            ffmpeg_cmd.pop(-8)
+        ffmpeg_cmd = build_ffmpeg_command(state.config, input_url, preview_dir)
             
         try:
             process = await asyncio.create_subprocess_exec(

@@ -14,6 +14,9 @@ class SourceProtocol(str, Enum):
     UDP = "udp"
     RIST = "rist"
 
+class NodeBinding(BaseModel):
+    local_bind_ip: Optional[str] = None
+
 class ServiceConfig(BaseModel):
     id: str
     name: str
@@ -25,6 +28,7 @@ class ServiceConfig(BaseModel):
     
     # Phase 2: Advanced Network & SRT options
     local_bind_ip: Optional[str] = None # For UDP multicast bind or SRT explicit NIC binding
+    node_bindings: dict[str, NodeBinding] = {}
     latency_ms: Optional[int] = None
     passphrase: Optional[str] = None
     pbkeylen: Optional[int] = None # 16, 24, 32
@@ -37,6 +41,10 @@ class ServiceConfig(BaseModel):
     strict_probing: bool = False
     enable_hls_preview: bool = False
     target_node: str = "primary"
+    ha_mode: str = "manual"
+    failover_node: Optional[str] = None
+    failover_after_seconds: int = 15
+    failback_policy: str = "manual"
     enabled: bool = True
 
     model_config = ConfigDict(from_attributes=True)

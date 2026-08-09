@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Boolean
+from sqlalchemy import Column, String, Integer, Boolean, JSON
 from api.database import Base
 
 class ServiceModel(Base):
@@ -14,6 +14,7 @@ class ServiceModel(Base):
     destination_url = Column(String)
     
     local_bind_ip = Column(String, nullable=True)
+    node_bindings = Column(JSON, nullable=True)
     latency_ms = Column(Integer, nullable=True)
     passphrase = Column(String, nullable=True)
     pbkeylen = Column(Integer, nullable=True)
@@ -25,4 +26,8 @@ class ServiceModel(Base):
     enable_hls_preview = Column(Boolean, default=False)
     
     target_node = Column(String, default="worker_1")
+    ha_mode = Column(String, default="manual")
+    failover_node = Column(String, nullable=True)
+    failover_after_seconds = Column(Integer, default=15)
+    failback_policy = Column(String, default="manual")
     enabled = Column(Boolean, default=True)

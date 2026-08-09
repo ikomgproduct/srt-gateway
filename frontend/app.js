@@ -2,6 +2,19 @@ const API_URL = window.location.origin + "/api";
 let servicesMap = {};
 let systemNodeRole = "primary";
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function jsString(value) {
+    return JSON.stringify(String(value ?? "")).replace(/</g, "\\u003c");
+}
+
 async function fetchNodeRole() {
     try {
         const res = await fetch(`${API_URL}/node_role`);
@@ -43,20 +56,32 @@ function renderServices(services) {
     services.forEach(s => {
         servicesMap[s.config.id] = s;
         const c = s.config;
-        const statusClass = `status-${s.status}`;
+        const serviceId = escapeHtml(c.id);
+        const serviceIdArg = jsString(c.id);
+        const targetNodeArg = jsString(c.target_node || "");
+        const previewIdPath = encodeURIComponent(c.id);
+        const serviceName = escapeHtml(c.name);
+        const status = escapeHtml(s.status);
+        const activeInput = escapeHtml(s.active_input || "main");
+        const statusClass = `status-${escapeHtml(s.status)}`;
+        const sourceProtocol = escapeHtml((c.source_protocol || "").toUpperCase());
+        const sourceMode = escapeHtml(c.source_mode || "");
+        const sourceIp = escapeHtml(c.source_ip || "");
+        const backupInputIp = escapeHtml(c.backup_input_ip || "");
+        const destinationUrl = escapeHtml(c.destination_url || "");
+        const targetNode = escapeHtml(c.target_node || "");
+        const errorMsg = escapeHtml(s.error_msg || "");
         
         let actionsHtml = "";
         if (s.status === "running") {
-            actionsHtml = `<button class="btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="stopService('${c.id}')" title="Stop"><i class="fa-solid fa-stop"></i></button>`;
-            actionsHtml += `<button class="btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; margin-left:4px;" onclick="startService('${c.id}', ${s.active_input === 'main' ? 'true' : 'false'})" title="Manual Hot-Swap Input"><i class="fa-solid fa-rotate"></i> Feed</button>`;
+            actionsHtml = `<button class="btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="stopService(${serviceIdArg})" title="Stop"><i class="fa-solid fa-stop"></i></button>`;
+            actionsHtml += `<button class="btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; margin-left:4px;" onclick="startService(${serviceIdArg}, ${s.active_input === 'main' ? 'true' : 'false'})" title="Manual Hot-Swap Input"><i class="fa-solid fa-rotate"></i> Feed</button>`;
         } else if (s.status === "stopped" || s.status === "error") {
-            actionsHtml = `<button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="startService('${c.id}')"><i class="fa-solid fa-play"></i> Start</button>`;
+            actionsHtml = `<button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="startService(${serviceIdArg})"><i class="fa-solid fa-play"></i> Start</button>`;
         } else {
             actionsHtml = `<button class="btn-secondary" style="padding: 6px 12px; font-size: 0.8rem;" disabled><i class="fa-solid fa-spinner fa-spin"></i></button>`;
         }
 
-        const path = c.source_path ? c.source_path : '';
-        const sourceLine = `${c.source_protocol.toUpperCase()}://${c.source_ip}:${c.source_port}${path}`;
         const encryptionText = c.pbkeylen && c.pbkeylen > 0 ? `<i class="fa-solid fa-lock" style="color:var(--accent);"></i> ${c.pbkeylen * 8}-bit` : `<i class="fa-solid fa-lock-open" style="color:var(--text-muted);"></i> None`;
 
         let nodeColor = c.target_node === 'primary' ? '#5e6ad2' : (c.target_node === 'backup' ? '#20c997' : '#e2e8f0');
@@ -65,24 +90,24 @@ function renderServices(services) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>
-                <div style="font-weight: 600; margin-bottom: 6px; font-size: 1rem;">${c.name}</div>
-                <span class="status-badge ${statusClass}">${s.status}</span>
-                ${s.error_msg ? `<div style="color: var(--danger); font-size: 0.75rem; margin-top: 6px; max-width: 150px; overflow:hidden; text-overflow:ellipsis;" title="${s.error_msg}"><i class="fa-solid fa-triangle-exclamation"></i> Error</div>` : ''}
+                <div style="font-weight: 600; margin-bottom: 6px; font-size: 1rem;">${serviceName}</div>
+                <span class="status-badge ${statusClass}">${status}</span>
+                ${s.error_msg ? `<div style="color: var(--danger); font-size: 0.75rem; margin-top: 6px; max-width: 150px; overflow:hidden; text-overflow:ellipsis;" title="${errorMsg}"><i class="fa-solid fa-triangle-exclamation"></i> Error</div>` : ''}
             </td>
             <td>
-                <div style="font-weight: 600; color: var(--text-main); margin-bottom: 2px;">${c.source_protocol.toUpperCase()}</div>
-                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">${c.source_mode}</div>
+                <div style="font-weight: 600; color: var(--text-main); margin-bottom: 2px;">${sourceProtocol}</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">${sourceMode}</div>
             </td>
             <td>
-                <div style="font-family: monospace; color: var(--text-main); background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; margin-bottom: 6px;" title="Main Source Feed">MAIN: ${c.source_ip}</div>
-                ${c.backup_input_ip ? `<div style="font-family: monospace; color: var(--accent); background: rgba(32,201,151,0.1); padding: 4px 8px; border-radius: 4px;" title="Standby Backup Feed">BACKUP: ${c.backup_input_ip}</div>` : ''}
+                <div style="font-family: monospace; color: var(--text-main); background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; margin-bottom: 6px;" title="Main Source Feed">MAIN: ${sourceIp}</div>
+                ${c.backup_input_ip ? `<div style="font-family: monospace; color: var(--accent); background: rgba(32,201,151,0.1); padding: 4px 8px; border-radius: 4px;" title="Standby Backup Feed">BACKUP: ${backupInputIp}</div>` : ''}
             </td>
             <td>
-                <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);" title="${c.destination_url}">${c.destination_url}</div>
+                <div style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);" title="${destinationUrl}">${destinationUrl}</div>
             </td>
             <td>
-                <div class="status-badge" style="background: ${s.active_input === 'main' ? 'rgba(94,106,210,0.2)' : 'rgba(32,201,151,0.2)'}; color: ${s.active_input === 'main' ? 'var(--primary)' : 'var(--accent)'}; margin-bottom:6px;">${s.active_input.toUpperCase()} FEED</div>
-                <div ${hideNodeInfo} style="font-size: 0.7rem; font-weight:600; color: ${nodeColor}; margin-bottom:4px;"><i class="fa-solid fa-server"></i> ${c.target_node.toUpperCase()} NODE</div>
+                <div class="status-badge" style="background: ${s.active_input === 'main' ? 'rgba(94,106,210,0.2)' : 'rgba(32,201,151,0.2)'}; color: ${s.active_input === 'main' ? 'var(--primary)' : 'var(--accent)'}; margin-bottom:6px;">${activeInput.toUpperCase()} FEED</div>
+                <div ${hideNodeInfo} style="font-size: 0.7rem; font-weight:600; color: ${nodeColor}; margin-bottom:4px;"><i class="fa-solid fa-server"></i> ${targetNode.toUpperCase()} NODE</div>
                 <div style="font-size: 0.75rem; color: var(--text-muted); font-weight:600;">${c.auto_failover ? '<i class="fa-solid fa-shield" style="color:var(--accent);"></i> Auto-Switch ON' : 'Manual Switch'} ${c.strict_probing ? '&bull; <span style="color:var(--danger);"><i class="fa-solid fa-magnifying-glass-chart"></i> Strict Watch</span>' : ''}</div>
             </td>
             <td>
@@ -91,19 +116,19 @@ function renderServices(services) {
             <td class="td-video">
                 <div class="td-video-inner">
                     ${s.status === 'running' ? `
-                        <img src="/previews/${c.id}/preview.jpg?t=${Date.now()}" style="width:100%; height:100%; object-fit:cover;" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div style=\\'color:var(--text-muted);font-size:0.75rem;\\'><i class=\\'fa-solid fa-spinner fa-spin\\'></i> Buffering...</div>';">
+                        <img src="/previews/${previewIdPath}/preview.jpg?t=${Date.now()}" style="width:100%; height:100%; object-fit:cover;" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div style=\\'color:var(--text-muted);font-size:0.75rem;\\'><i class=\\'fa-solid fa-spinner fa-spin\\'></i> Buffering...</div>';">
                     ` : `
                         <div style="color: rgba(255,255,255,0.1);"><i class="fa-solid fa-video-slash" style="font-size:1.5rem;"></i></div>
                     `}
                 </div>
-                ${c.enable_hls_preview ? `<div style="text-align:center; margin-top:8px;"><button style="background:transparent; border:1px solid var(--primary); color:var(--primary); padding:4px 8px; border-radius:4px; font-weight:600; cursor:pointer; font-size:0.7rem; transition:0.2s;" onclick="navigator.clipboard.writeText('${window.location.origin}/previews/${s.id}/stream.m3u8'); this.innerHTML='<i class=\\'fa-solid fa-check\\'></i> Copied!'; setTimeout(()=>this.innerHTML='<i class=\\'fa-solid fa-link\\'></i> Copy HLS Link',2000);"><i class="fa-solid fa-link"></i> Copy HLS Link</button></div>` : ''}
+                ${c.enable_hls_preview ? `<div style="text-align:center; margin-top:8px;"><button style="background:transparent; border:1px solid var(--primary); color:var(--primary); padding:4px 8px; border-radius:4px; font-weight:600; cursor:pointer; font-size:0.7rem; transition:0.2s;" onclick="navigator.clipboard.writeText(window.location.origin + '/previews/${previewIdPath}/stream.m3u8'); this.innerHTML='<i class=\\'fa-solid fa-check\\'></i> Copied!'; setTimeout(()=>this.innerHTML='<i class=\\'fa-solid fa-link\\'></i> Copy HLS Link',2000);"><i class="fa-solid fa-link"></i> Copy HLS Link</button></div>` : ''}
             </td>
             <td>
                 <div class="td-actions">
                     ${actionsHtml}
-                    ${systemNodeRole !== "standalone" ? `<button class="icon-btn" style="margin-left: 12px; color: ${nodeColor};" onclick="swapNode('${c.id}', '${c.target_node}')" title="Move Stream to Twin Hardware Node"><i class="fa-solid fa-server"></i> Move</button>` : ''}
-                    <button class="icon-btn" style="margin-left: 4px;" onclick="editService('${c.id}')" title="Edit Properties"><i class="fa-solid fa-gear"></i></button>
-                    <button class="icon-btn delete" onclick="deleteService('${c.id}')" title="Delete Pipeline"><i class="fa-solid fa-trash"></i></button>
+                    ${systemNodeRole !== "standalone" ? `<button class="icon-btn" style="margin-left: 12px; color: ${nodeColor};" onclick="swapNode(${serviceIdArg}, ${targetNodeArg})" title="Move Stream to Twin Hardware Node"><i class="fa-solid fa-server"></i> Move</button>` : ''}
+                    <button class="icon-btn" style="margin-left: 4px;" onclick="editService(${serviceIdArg})" title="Edit Properties"><i class="fa-solid fa-gear"></i></button>
+                    <button class="icon-btn delete" onclick="deleteService(${serviceIdArg})" title="Delete Pipeline"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </td>
         `;
@@ -161,6 +186,7 @@ document.getElementById('serviceForm').addEventListener('submit', async (e) => {
         target_node: document.getElementById('targetNode').value,
         
         local_bind_ip: document.getElementById('localBindIp').value || null,
+        node_bindings: isEdit ? (servicesMap[id].config.node_bindings || {}) : {},
         latency_ms: document.getElementById('latencyMs').value ? parseInt(document.getElementById('latencyMs').value, 10) : null,
         passphrase: document.getElementById('passphrase').value || null,
         pbkeylen: keylenParsed !== 0 ? keylenParsed : null,
