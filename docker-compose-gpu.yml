@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   srt-gateway:
     build: .
-    restart: unless-stopped
+    restart: always
     ports:
       - "8000:8000" # Web UI / API Primary
       - "9000-9010:9000-9010/udp" # SRT Listener port block Primary
@@ -25,7 +23,7 @@ services:
 
   srt-gateway-backup:
     build: .
-    restart: unless-stopped
+    restart: always
     ports:
       - "8001:8000" # Web UI / API Secondary 
       - "9011-9021:9000-9010/udp" # SRT Listener port block Secondary via NAT shift
@@ -47,7 +45,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    restart: unless-stopped
+    restart: always
     ports:
       - "9090:9090"
     volumes:
@@ -58,7 +56,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    restart: unless-stopped
+    restart: always
     ports:
       - "3000:3000"
     environment:

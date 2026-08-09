@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:15
@@ -21,7 +19,7 @@ services:
   api:
     build: .
     command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
-    restart: unless-stopped
+    restart: always
     ports:
       - "8000:8000"
     environment:
@@ -37,7 +35,7 @@ services:
   worker-primary:
     build: .
     command: python -m worker.worker
-    restart: unless-stopped
+    restart: always
     ports:
       - "9000-9010:9000-9010/udp"
     environment:
@@ -52,7 +50,7 @@ services:
   worker-backup:
     build: .
     command: python -m worker.worker
-    restart: unless-stopped
+    restart: always
     ports:
       - "9011-9021:9000-9010/udp"
     environment:
@@ -67,7 +65,7 @@ services:
   telemetry:
     build: .
     command: python -m telemetry.main
-    restart: unless-stopped
+    restart: always
     environment:
       - REDIS_URL=redis://redis:6379/0
       - PYTHONUNBUFFERED=1
@@ -76,6 +74,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
+    restart: always
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
@@ -87,7 +86,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    restart: unless-stopped
+    restart: always
     ports:
       - "4000:3000"
     environment:
