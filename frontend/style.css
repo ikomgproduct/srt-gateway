@@ -206,6 +206,7 @@ nav ul li.active {
 .status-running { background: rgba(32, 201, 151, 0.15); color: var(--accent); }
 .status-starting { background: rgba(94, 106, 210, 0.15); color: var(--primary); }
 .status-error { background: rgba(255, 77, 79, 0.15); color: var(--danger); }
+.status-pending_worker { background: rgba(245, 158, 11, 0.16); color: #f59e0b; }
 
 .card-body {
     display: flex;
@@ -244,6 +245,13 @@ nav ul li.active {
 
 .icon-btn:hover { color: var(--text-main); }
 .icon-btn.delete:hover { color: var(--danger); }
+.icon-btn:disabled,
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
 
 /* Modal */
 .modal-overlay {
@@ -386,4 +394,83 @@ form input:focus { border-color: var(--primary); }
     display: flex;
     gap: 8px;
     align-items: center;
+}
+
+.table-action {
+    min-height: 32px;
+}
+
+.url-cell {
+    min-width: 260px;
+    max-width: 340px;
+}
+
+.url-line {
+    display: grid;
+    grid-template-columns: 66px minmax(0, 1fr) 28px;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.url-line:last-child {
+    margin-bottom: 0;
+}
+
+.url-label {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.url-line code {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: rgba(0,0,0,0.2);
+    color: var(--text-main);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 0.78rem;
+}
+
+.copy-mini,
+.copy-hls-btn,
+.error-tag {
+    border: 1px solid var(--border);
+    background: rgba(0,0,0,0.16);
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.copy-mini {
+    width: 28px;
+    height: 28px;
+}
+
+.copy-mini:hover,
+.copy-hls-btn:hover {
+    color: var(--text-main);
+    border-color: var(--primary);
+}
+
+.copy-hls-btn {
+    padding: 4px 8px;
+    font-weight: 600;
+    font-size: 0.7rem;
+    color: var(--primary);
+}
+
+.error-tag {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    margin-top: 6px;
+    padding: 4px 8px;
+    color: var(--danger);
+    font-size: 0.72rem;
+    font-weight: 700;
 }

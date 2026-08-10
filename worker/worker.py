@@ -243,17 +243,39 @@ class WorkerNode:
             "error_msg": "",
             "enabled": True
         }
+        await self.publish_service_state(config.id)
         
-        preview_dir = os.path.join(PREVIEW_DIR, config.id)
-        os.makedirs(preview_dir, exist_ok=True)
-        input_url = build_input_url(config, use_backup, NODE_ROLE)
-        ffmpeg_cmd = build_ffmpeg_command(config, input_url, preview_dir)
+        try:
+            preview_dir = os.path.join(PREVIEW_DIR, config.id)
+            os.makedirs(preview_dir, exist_ok=True)
+            input_url = build_input_url(config, use_backup, NODE_ROLE)
+            ffmpeg_cmd = build_ffmpeg_command(config, input_url, preview_dir)
+            self.processes[config.id] = await asyncio.create_subprocess_exec(
+                *ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+        except Exception as e:
+            logger.error(f"Failed to prepare or launch FFmpeg for {config.id}: {e}")
+            self.state[config.id]["status"] = "error"
+            self.state[config.id]["error_msg"] = f"FFmpeg start failed: {e}"
+            await self.publish_service_state(config.id)
+            return
 
-        self.processes[config.id] = await asyncio.create_subprocess_exec(
-            *ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
         self.state[config.id]["status"] = "running"
+        await self.publish_service_state(config.id)
         asyncio.create_task(self.monitor_process(config.id, input_url))
+
+    async def publish_service_state(self, service_id: str):
+        details = self.state.get(service_id)
+        if not details:
+            return
+        export = {
+            "status": details["status"],
+            "active_input": details["active_input"],
+            "bitrate": details["bitrate"],
+            "cc": details["cc"],
+            "error_msg": details["error_msg"]
+        }
+        await self.redis.hset("stream_metrics_cache", service_id, json.dumps(export))
 
     async def monitor_process(self, service_id: str, input_url: str):
         process = self.processes.get(service_id)
@@ -302,6 +324,7 @@ class WorkerNode:
         if process.returncode != 0:
             self.state[service_id]["status"] = "error"
             self.state[service_id]["error_msg"] = last_error_line or f"Failed code {process.returncode}"
+            await self.publish_service_state(service_id)
             
             # Autonomic Load Balancing trigger!
             c = self.state[service_id]["config"]
@@ -310,6 +333,7 @@ class WorkerNode:
                 asyncio.create_task(self.start_service(c, use_backup))
         else:
             self.state[service_id]["status"] = "stopped"
+            await self.publish_service_state(service_id)
 
 if __name__ == "__main__":
     w = WorkerNode()

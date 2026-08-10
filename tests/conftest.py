@@ -40,13 +40,17 @@ def mock_redis(monkeypatch):
 
         async def close(self): pass
         async def publish(self, channel, message): return 1
-        async def hget(self, name, key): return None
+        async def hget(self, name, key):
+            return self.hashes.get(name, {}).get(key)
         async def hset(self, name, key, value):
             self.hashes.setdefault(name, {})[key] = value
             return 1
         async def hdel(self, name, key):
             self.hashes.setdefault(name, {}).pop(key, None)
             return 1
+        async def scan_iter(self, pattern):
+            if False:
+                yield pattern
         
     import api.main
     monkeypatch.setattr(api.main, "redis_client", DummyRedis())

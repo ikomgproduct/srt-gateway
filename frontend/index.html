@@ -48,7 +48,7 @@
                         <tr>
                             <th>Status / Name</th>
                             <th>Protocol / Mode</th>
-                            <th>Source Address</th>
+                            <th>Source</th>
                             <th>Destination</th>
                             <th>Input</th>
                             <th>Encryption</th>
@@ -147,10 +147,71 @@
                         <div class="form-group" id="hardwareNodeGroup">
                             <label>Hardware Exec Node (Cluster HA)</label>
                             <select id="targetNode" class="form-control-select">
+                                <option value="worker_1">Single Worker (worker_1)</option>
                                 <option value="primary">Primary Server Only</option>
                                 <option value="backup">Backup Server Only</option>
                                 <option value="all">Active-Active (Run on Both)</option>
                             </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Destination Builder</label>
+                        <select id="destinationBuilderProtocol" class="form-control-select">
+                            <option value="raw">Use URL field directly</option>
+                            <option value="rtmp">RTMP destination</option>
+                            <option value="srt">SRT destination</option>
+                        </select>
+                    </div>
+
+                    <div id="destinationBuilderFields" style="display: none; flex-direction: column; gap: 16px;">
+                        <div class="form-group-row">
+                            <div class="form-group">
+                                <label>Destination Host/IP</label>
+                                <input type="text" id="destinationHost" placeholder="e.g. 192.168.10.20">
+                            </div>
+                            <div class="form-group">
+                                <label>Destination Port</label>
+                                <input type="number" id="destinationPort" placeholder="1935">
+                            </div>
+                        </div>
+                        <div class="form-group-row destination-rtmp-field">
+                            <div class="form-group">
+                                <label>RTMP App/Path</label>
+                                <input type="text" id="destinationPath" placeholder="/live">
+                            </div>
+                            <div class="form-group">
+                                <label>RTMP Stream Key</label>
+                                <input type="text" id="destinationKey" placeholder="stream-key">
+                            </div>
+                        </div>
+                        <div class="form-group-row destination-srt-field">
+                            <div class="form-group">
+                                <label>SRT Mode</label>
+                                <select id="destinationMode" class="form-control-select">
+                                    <option value="caller">Caller</option>
+                                    <option value="listener">Listener</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>SRT Stream ID</label>
+                                <input type="text" id="destinationStreamid" placeholder="Optional routing ID">
+                            </div>
+                        </div>
+                        <div class="form-group-row destination-srt-field">
+                            <div class="form-group">
+                                <label>SRT Passphrase</label>
+                                <input type="text" id="destinationPassphrase" placeholder="Optional encryption key">
+                            </div>
+                            <div class="form-group">
+                                <label>SRT Key Size</label>
+                                <select id="destinationPbkeylen" class="form-control-select">
+                                    <option value="">None</option>
+                                    <option value="16">16 Bytes (128-bit)</option>
+                                    <option value="24">24 Bytes (192-bit)</option>
+                                    <option value="32">32 Bytes (256-bit)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     

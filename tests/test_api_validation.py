@@ -1,4 +1,5 @@
 import pytest
+from api.main import eligible_worker_roles, service_has_eligible_worker
 
 
 @pytest.mark.asyncio
@@ -94,3 +95,44 @@ async def test_rejects_invalid_node_binding_fields(async_client):
     response = await async_client.post("/api/services", json=payload)
 
     assert response.status_code == 422
+
+
+def test_active_passive_workers_are_eligible():
+    config = {
+        "target_node": "primary",
+        "ha_mode": "active_passive",
+        "failover_node": "backup",
+    }
+
+    assert eligible_worker_roles(config) == {"primary", "backup"}
+    assert service_has_eligible_worker(config, {"backup"})
+
+
+def test_all_target_still_requires_online_worker():
+    config = {"target_node": "all", "ha_mode": "manual"}
+
+    assert not service_has_eligible_worker(config, set())
+    assert service_has_eligible_worker(config, {"worker_1"})
+
+
+@pytest.mark.asyncio
+async def test_enabled_service_without_matching_worker_reports_pending(async_client):
+    payload = {
+        "name": "No matching worker",
+        "source_protocol": "srt",
+        "source_ip": "127.0.0.1",
+        "source_port": 9901,
+        "destination_url": "udp://239.10.10.10:5001",
+        "target_node": "primary",
+        "enabled": True,
+    }
+
+    create_response = await async_client.post("/api/services", json=payload)
+    assert create_response.status_code == 200
+
+    response = await async_client.get("/api/services")
+
+    assert response.status_code == 200
+    service = response.json()[0]
+    assert service["status"] == "pending_worker"
+    assert "No eligible worker online" in service["error_msg"]

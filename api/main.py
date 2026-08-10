@@ -18,6 +18,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 redis_client = None
 
 DESIRED_CONFIGS_KEY = "service_configs"
+HEARTBEAT_PREFIX = "worker_heartbeat:"
 
 async def ensure_schema_columns():
     async with engine.begin() as conn:
@@ -41,6 +42,32 @@ async def sync_desired_config(service_id: str, config: dict | None):
         await redis_client.hdel(DESIRED_CONFIGS_KEY, service_id)
     else:
         await redis_client.hset(DESIRED_CONFIGS_KEY, service_id, json.dumps(config))
+
+async def get_worker_roles() -> set[str]:
+    if not redis_client:
+        return set()
+    roles = set()
+    async for key in redis_client.scan_iter(f"{HEARTBEAT_PREFIX}*"):
+        key_text = key.decode() if isinstance(key, bytes) else key
+        roles.add(key_text.replace(HEARTBEAT_PREFIX, "", 1))
+    return roles
+
+def eligible_worker_roles(config: dict) -> set[str]:
+    target_node = config.get("target_node")
+    failover_node = config.get("failover_node")
+    ha_mode = config.get("ha_mode", "manual")
+
+    if target_node == "all":
+        return {"all"}
+    if ha_mode == "active_passive":
+        return {role for role in [target_node, failover_node] if role}
+    return {target_node} if target_node else set()
+
+def service_has_eligible_worker(config: dict, worker_roles: set[str]) -> bool:
+    eligible = eligible_worker_roles(config)
+    if "all" in eligible:
+        return bool(worker_roles)
+    return bool(eligible.intersection(worker_roles))
 
 @app.on_event("startup")
 async def startup():
@@ -78,6 +105,7 @@ async def hardware_metrics_loop():
 async def get_services(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ServiceModel))
     services = result.scalars().all()
+    worker_roles = await get_worker_roles()
     out = []
     for s in services:
         d = s.__dict__.copy()
@@ -86,14 +114,27 @@ async def get_services(db: AsyncSession = Depends(get_db)):
         # Real-time state is stored externally globally in Redis by the active tracking Workers
         stats_raw = await redis_client.hget("stream_metrics_cache", s.id)
         stats = json.loads(stats_raw) if stats_raw else {"status": "stopped", "active_input": "main"}
+        status = stats.get("status", "stopped")
+        error_msg = stats.get("error_msg")
+
+        if d.get("enabled") and status == "stopped" and not service_has_eligible_worker(d, worker_roles):
+            status = "pending_worker"
+            expected = ", ".join(sorted(eligible_worker_roles(d))) or "none"
+            online = ", ".join(sorted(worker_roles)) or "none"
+            error_msg = f"No eligible worker online. Service targets: {expected}. Online workers: {online}."
         
         out.append({
             "config": d,
-            "status": stats.get("status", "stopped"),
+            "status": status,
             "active_input": stats.get("active_input", "main"),
-            "error_msg": stats.get("error_msg")
+            "error_msg": error_msg,
+            "online_workers": sorted(worker_roles)
         })
     return out
+
+@app.get("/api/workers")
+async def get_workers():
+    return {"workers": sorted(await get_worker_roles())}
 
 @app.post("/api/services")
 async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
