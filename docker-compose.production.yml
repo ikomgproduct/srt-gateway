@@ -9,18 +9,35 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-srt_user} -d ${POSTGRES_DB:-srt_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:alpine
     profiles: ["local-state"]
     command: redis-server --appendonly yes
     restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     build: .
     profiles: ["control-plane"]
     command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
     restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
     ports:
       - "${API_BIND_IP:-10.75.51.40}:8000:8000"
     environment:
@@ -29,15 +46,20 @@ services:
       - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
       - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
       - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
+      - INTERFACE_INVENTORY_JSON=${INTERFACE_INVENTORY_JSON:-}
       - PYTHONUNBUFFERED=1
     volumes:
-      - shared_previews:/app/frontend/previews
+      - ${PREVIEW_STORAGE:-shared_previews}:/app/frontend/previews
 
   worker-primary:
     build: .
     profiles: ["primary-worker"]
     command: python -m worker.worker
     restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
     ports:
       - "${PRIMARY_VIDEO_IP:-10.70.15.3}:${PRIMARY_PORT_RANGE:-9000-9010}:9000-9010/udp"
     environment:
@@ -48,13 +70,17 @@ services:
       - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
       - PYTHONUNBUFFERED=1
     volumes:
-      - shared_previews:/app/frontend/previews
+      - ${PREVIEW_STORAGE:-shared_previews}:/app/frontend/previews
 
   worker-backup:
     build: .
     profiles: ["backup-worker"]
     command: python -m worker.worker
     restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
     ports:
       - "${BACKUP_VIDEO_IP:-10.71.15.3}:${BACKUP_PORT_RANGE:-9000-9010}:9000-9010/udp"
     environment:
@@ -65,13 +91,17 @@ services:
       - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
       - PYTHONUNBUFFERED=1
     volumes:
-      - shared_previews:/app/frontend/previews
+      - ${PREVIEW_STORAGE:-shared_previews}:/app/frontend/previews
 
   telemetry:
     build: .
     profiles: ["control-plane"]
     command: python -m telemetry.main
     restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - PYTHONUNBUFFERED=1
@@ -84,6 +114,8 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
+    depends_on:
+      - telemetry
 
   grafana:
     image: grafana/grafana:latest
@@ -98,6 +130,8 @@ services:
       - grafana-storage:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
 
 volumes:
   pgdata:

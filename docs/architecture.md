@@ -25,6 +25,7 @@ Observability:
 - Redis metrics cache and Pub/Sub telemetry.
 - Prometheus/Grafana compose services.
 - Preview thumbnails and HLS playlists written under `frontend/previews/<service_id>/`.
+- Production deployments mount that preview path from `PREVIEW_STORAGE`; multi-server HA must use shared storage mounted on all participating hosts.
 
 ## Data Flow
 
@@ -141,12 +142,19 @@ Guardrails:
 ## Deployment Strategy
 
 - Keep production compose separate as `docker-compose.production.yml`.
+- Use `docker-compose.production.yml` as the canonical production file for single-server and multi-server HA.
+- Select deployment shape with env files and profiles:
+  - single server: `local-state,control-plane,primary-worker,backup-worker`
+  - control plane: `local-state,control-plane` or `control-plane` with external state
+  - primary worker: `primary-worker`
+  - backup worker: `backup-worker`
 - Do not overwrite server-local `docker-compose-microservices.yml` without explicit approval.
 - Bind API/UI and Grafana only to management IPs.
 - Keep Redis/Postgres internal for single-server deployments.
 - Expose Redis/Postgres on management network only when multi-server HA requires it.
-- Production `shared_previews` storage is disk-backed and sized operationally; small tmpfs preview storage is suitable only for lab/thumbnail use.
+- Production preview/HLS storage is selected with `PREVIEW_STORAGE`; named volume `shared_previews` is suitable for single-server, while multi-server requires a real shared filesystem path.
 - Production compose carries explicit `MAX_FULL_HLS_SERVICES`, `HLS_MIN_FREE_BYTES`, and `HLS_STORAGE_QUOTA_BYTES` defaults.
+- Older compose files are lab/legacy paths and are labelled as such.
 
 ## Testing
 
@@ -167,6 +175,8 @@ Important coverage areas:
 - Legacy `StreamManager` node-role propagation into FFmpeg command building.
 
 Last verified result after rebuild: `56 passed` with no pytest warning summary.
+
+Latest production compose validation rendered successfully for single-server, control-plane, primary-worker, and backup-worker env examples.
 
 ## Operational Caveats
 

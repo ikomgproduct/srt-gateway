@@ -1,3 +1,4 @@
+# LEGACY STANDALONE PAIR ONLY. Production HA uses docker-compose.production.yml with explicit profiles/env files.
 services:
   srt-gateway:
     build: .

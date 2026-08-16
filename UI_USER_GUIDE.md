@@ -151,6 +151,7 @@ Select the input protocol:
 - `RTMP`
 - `UDP`
 - `RIST`
+- `HLS`
 
 #### Source Mode
 
@@ -584,7 +585,7 @@ Check:
 Command:
 
 ```bash
-sudo docker compose -f docker-compose-microservices.yml ps
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
 ```
 
 ### Service Shows Error
@@ -603,8 +604,8 @@ Common causes:
 Check worker logs:
 
 ```bash
-sudo docker compose -f docker-compose-microservices.yml logs -f worker-primary
-sudo docker compose -f docker-compose-microservices.yml logs -f worker-backup
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f worker-primary
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f worker-backup
 ```
 
 ### No Preview
@@ -651,8 +652,8 @@ http://10.75.51.40:8000
 Check:
 
 ```bash
-sudo docker compose -f docker-compose-microservices.yml ps
-sudo docker compose -f docker-compose-microservices.yml logs -f api
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f api
 ```
 
 ## Daily Operations Checklist
@@ -670,14 +671,14 @@ After updating the server repository:
 
 ```bash
 git pull --ff-only origin main
-sudo docker compose -f docker-compose-microservices.yml build
-sudo docker compose -f docker-compose-microservices.yml up -d
-sudo docker compose -f docker-compose-microservices.yml ps
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml build
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
 ```
 
 If the Dockerfile was changed and you want a fully fresh build:
 
 ```bash
-sudo docker compose -f docker-compose-microservices.yml build --no-cache
-sudo docker compose -f docker-compose-microservices.yml up -d
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml build --no-cache
+sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d
 ```

@@ -1,6 +1,37 @@
 # SRT Gateway Backlog
 
-## Current Priority: Address Dev Lead Review Before QA
+## Current Priority: Production Compose Cleanup Before QA
+
+### 0. Make Production Compose Canonical
+
+Status: Done
+
+Goal:
+
+- Support production HA on either one physical server or multiple physical servers without relying on legacy/lab compose files.
+
+Requirements:
+
+- Keep `docker-compose.production.yml` as the production HA contract.
+- Support single-server, control-plane, primary-worker, and backup-worker profiles via env files.
+- Keep Redis/Postgres Docker-internal for single-server mode.
+- Require management-network Redis/Postgres and shared preview storage for multi-server mode.
+- Mark older compose files as lab/legacy.
+
+Acceptance:
+
+- Production compose renders for single-server, control-plane, primary worker, and backup worker env examples.
+- Multi-server env examples include `PREVIEW_STORAGE`.
+- README and architecture docs point production users to `docker-compose.production.yml`.
+
+Implementation notes:
+
+- `PREVIEW_STORAGE` controls the `/app/frontend/previews` mount.
+- Single-server uses Docker named volume `shared_previews`.
+- Multi-server examples use `/mnt/srt-gateway/previews` as the shared storage path.
+- Old compose files now carry top-of-file lab/legacy warnings.
+
+## Previous Priority: Address Dev Lead Review Before QA
 
 ### 1. Replace Binding Free Text With Interface Inventory Dropdowns
 

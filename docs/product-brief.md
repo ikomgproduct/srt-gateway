@@ -20,6 +20,8 @@ Initial production target:
 - Primary video worker bound to `10.70.15.3`.
 - Backup video worker bound to `10.71.15.3`.
 - Redis/Postgres are internal Docker services for single-server deployment.
+- Multi-server deployments require Redis/Postgres reachable over the management network.
+- Multi-server preview and HLS output requires shared storage mounted on the control-plane and worker hosts.
 - Access is through the DMZ.
 
 The architecture should remain portable enough to support single-server and multi-server hardware layouts.
@@ -98,4 +100,6 @@ HLS output:
 - Product UI should be operator-safe and not expose confusing lab-only defaults.
 - Existing services must remain compatible.
 - Production compose changes must be explicit and must not overwrite server-local compose files.
+- `docker-compose.production.yml` is the production HA contract for both single-server and multi-server layouts.
+- Older compose files are lab/legacy compatibility paths.
 - Full HLS must remain guarded by service count and disk capacity controls before production use.
