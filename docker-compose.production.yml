@@ -1,0 +1,100 @@
+services:
+  db:
+    image: postgres:15
+    profiles: ["local-state"]
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-srt_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-srt_pass}
+      - POSTGRES_DB=${POSTGRES_DB:-srt_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:alpine
+    profiles: ["local-state"]
+    command: redis-server --appendonly yes
+    restart: always
+
+  api:
+    build: .
+    profiles: ["control-plane"]
+    command: python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+    restart: always
+    ports:
+      - "${API_BIND_IP:-10.75.51.40}:8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://srt_user:srt_pass@db:5432/srt_db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - shared_previews:/app/frontend/previews
+
+  worker-primary:
+    build: .
+    profiles: ["primary-worker"]
+    command: python -m worker.worker
+    restart: always
+    ports:
+      - "${PRIMARY_VIDEO_IP:-10.70.15.3}:${PRIMARY_PORT_RANGE:-9000-9010}:9000-9010/udp"
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - NODE_ROLE=primary
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - shared_previews:/app/frontend/previews
+
+  worker-backup:
+    build: .
+    profiles: ["backup-worker"]
+    command: python -m worker.worker
+    restart: always
+    ports:
+      - "${BACKUP_VIDEO_IP:-10.71.15.3}:${BACKUP_PORT_RANGE:-9000-9010}:9000-9010/udp"
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - NODE_ROLE=backup
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - shared_previews:/app/frontend/previews
+
+  telemetry:
+    build: .
+    profiles: ["control-plane"]
+    command: python -m telemetry.main
+    restart: always
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - PYTHONUNBUFFERED=1
+
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["control-plane"]
+    restart: always
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["control-plane"]
+    restart: always
+    ports:
+      - "${GRAFANA_BIND_IP:-10.75.15.3}:4000:3000"
+      - "${GRAFANA_ALT_BIND_IP:-10.75.51.40}:4000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+
+volumes:
+  pgdata:
+  grafana-storage:
+  shared_previews:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=500m,uid=1000

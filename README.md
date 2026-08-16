@@ -50,6 +50,7 @@ Compose files:
 - `docker-compose-microservices.yml`
 - `docker-compose-microservices-gpu.yml`
 - `docker-compose-microservices-ha.yml`
+- `docker-compose.production.yml` for explicit production layouts with management-bound API/Grafana and primary/backup worker profiles
 
 Recommended production direction: **microservices mode**.
 
@@ -89,15 +90,21 @@ Per-node field for redundant installations:
 ```json
 {
   "node_bindings": {
-    "primary": { "local_bind_ip": "10.50.1.21" },
-    "backup": { "local_bind_ip": "10.50.1.22" }
+    "primary": {
+      "input_bind_ip": "10.50.1.21",
+      "output_bind_ip": "10.50.1.21"
+    },
+    "backup": {
+      "input_bind_ip": "10.50.1.22",
+      "output_bind_ip": "10.50.1.22"
+    }
   }
 }
 ```
 
-When the `primary` node owns the service, FFmpeg binds to `10.50.1.21`. When the `backup` node owns the service, FFmpeg binds to `10.50.1.22`.
+When the `primary` node owns the service, FFmpeg uses the primary binding. When the `backup` node owns the service, FFmpeg uses the backup binding.
 
-If `node_bindings` does not contain the active node, the system falls back to `local_bind_ip`.
+If `node_bindings` does not contain the active node, the system falls back to legacy `local_bind_ip`. New services should prefer explicit input/output bindings.
 
 ## Redundancy Model
 
@@ -289,8 +296,14 @@ Example active/passive SRT listener service:
   "failover_after_seconds": 15,
   "failback_policy": "manual",
   "node_bindings": {
-    "primary": { "local_bind_ip": "10.50.1.21" },
-    "backup": { "local_bind_ip": "10.50.1.22" }
+    "primary": {
+      "input_bind_ip": "10.50.1.21",
+      "output_bind_ip": "10.50.1.21"
+    },
+    "backup": {
+      "input_bind_ip": "10.50.1.22",
+      "output_bind_ip": "10.50.1.22"
+    }
   },
   "enabled": true
 }
@@ -301,12 +314,13 @@ Example active/passive SRT listener service:
 | Field | Description |
 | --- | --- |
 | `name` | Friendly service name. |
-| `source_protocol` | `srt`, `udp`, `rtmp`, or `rist`. |
+| `source_protocol` | `srt`, `udp`, `rtmp`, `rist`, or `hls`. |
 | `source_mode` | `listener` or `caller`. Most relevant for SRT/RTMP/RIST. |
 | `source_ip` | Source address. For listener mode, often `0.0.0.0`. |
-| `source_port` | Input port, 1-65535. |
+| `source_port` | Input port, 1-65535. Required except for HLS sources. |
 | `source_path` | RTMP path, for example `/live/stream`. |
-| `destination_url` | Output URL. Must start with `rtmp://`, `rtmps://`, `srt://`, `udp://`, or `rist://`. |
+| `source_url` | HLS source URL. Required when `source_protocol` is `hls`. |
+| `destination_url` | Output URL. Must start with `rtmp://`, `rtmps://`, `srt://`, `udp://`, or `rist://`. May be empty when low-res or full HLS output is enabled. |
 | `enabled` | Whether the service should run. |
 
 ### Network Fields
@@ -314,7 +328,7 @@ Example active/passive SRT listener service:
 | Field | Description |
 | --- | --- |
 | `local_bind_ip` | Default video-network IP for FFmpeg binding. |
-| `node_bindings` | Per-node video binding map. Overrides `local_bind_ip` for matching `NODE_ROLE`. |
+| `node_bindings` | Per-node binding map. `input_bind_ip` controls source-side binding and `output_bind_ip` controls SRT/UDP destination binding where supported. Legacy `local_bind_ip` remains a fallback. |
 
 ### SRT/Advanced Fields
 
@@ -327,7 +341,8 @@ Example active/passive SRT listener service:
 | `backup_input_ip` | Alternate input address used for input-level failover. |
 | `auto_failover` | Switches between main and backup input when FFmpeg fails. |
 | `strict_probing` | Kills/restarts streams with severe probe or continuity errors. |
-| `enable_hls_preview` | Enables a 360p HLS preview output. |
+| `enable_hls_preview` | Compatibility flag for low-res HLS output. When true, low-res HLS is enabled. |
+| `hls_outputs` | Optional HLS output profiles. `low_res` generates 360p/480p with a short buffer; `full_res` generates 720p/1080p with configurable buffer up to 24 hours. |
 
 ### HA Fields
 

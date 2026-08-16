@@ -1,6 +1,10 @@
 const API_URL = window.location.origin + "/api";
 let servicesMap = {};
 let systemNodeRole = "primary";
+let interfaceInventory = [
+    { id: "primary-video-main", label: "Primary Video Main", ip: "10.70.15.3", node_roles: ["primary"], directions: ["input", "output"], network: "video" },
+    { id: "backup-video-backup", label: "Backup Video Backup", ip: "10.71.15.3", node_roles: ["backup"], directions: ["input", "output"], network: "video" }
+];
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -53,6 +57,20 @@ async function fetchNodeRole() {
 }
 fetchNodeRole();
 
+async function fetchInterfaces() {
+    try {
+        const data = await apiRequest(`${API_URL}/interfaces`, {}, "Load interfaces");
+        if (Array.isArray(data.interfaces) && data.interfaces.length) {
+            interfaceInventory = data.interfaces;
+        }
+    } catch (e) {
+        console.error("Failed to fetch interface inventory", e);
+    } finally {
+        populateAllInterfaceSelects();
+    }
+}
+fetchInterfaces();
+
 async function fetchServices() {
     try {
         const data = await apiRequest(`${API_URL}/services`, {}, "Load services");
@@ -74,10 +92,33 @@ function normalizePath(path) {
     return path.startsWith("/") ? path : `/${path}`;
 }
 
+function getHlsOutputs(config = {}) {
+    const outputs = config.hls_outputs || {};
+    return {
+        low_res: {
+            enabled: !!(config.enable_hls_preview || outputs.low_res?.enabled),
+            buffer_seconds: outputs.low_res?.buffer_seconds || 10
+        },
+        full_res: {
+            enabled: !!outputs.full_res?.enabled,
+            buffer_seconds: outputs.full_res?.buffer_seconds || 3600
+        }
+    };
+}
+
+function hasAnyHlsOutput(config = {}) {
+    const outputs = getHlsOutputs(config);
+    return outputs.low_res.enabled || outputs.full_res.enabled;
+}
+
 function buildFullSourceUrl(config, useBackup = false) {
     const protocol = (config.source_protocol || "srt").toLowerCase();
-    const host = useBackup && config.backup_input_ip ? config.backup_input_ip : (config.source_ip || "0.0.0.0");
+    if (protocol === "hls") return config.source_url || "";
+
+    const inputBind = getEffectiveInputBind(config);
+    let host = useBackup && config.backup_input_ip ? config.backup_input_ip : (config.source_ip || "0.0.0.0");
     const port = config.source_port || "";
+    if (inputBind && protocol === "srt" && (config.source_mode || "listener") === "listener") host = inputBind;
     const base = `${protocol}://${host}${port ? `:${port}` : ""}`;
 
     if (protocol === "rtmp") return `${base}${normalizePath(config.source_path || "")}`;
@@ -88,13 +129,107 @@ function buildFullSourceUrl(config, useBackup = false) {
             passphrase: config.passphrase,
             pbkeylen: config.pbkeylen,
             streamid: config.streamid,
-            localaddr: config.local_bind_ip
+            localaddr: (config.source_mode || "listener") === "caller" ? inputBind : ""
         });
     }
     if (protocol === "udp") {
-        return appendQuery(base, { localaddr: config.local_bind_ip });
+        return appendQuery(base, { localaddr: inputBind });
     }
     return base;
+}
+
+function getNodeBinding(config, role) {
+    return (config.node_bindings && config.node_bindings[role]) || {};
+}
+
+function getExplicitInputBind(config, role = config.target_node) {
+    const binding = getNodeBinding(config, role);
+    return binding.input_bind_ip || binding.local_bind_ip || "";
+}
+
+function getExplicitOutputBind(config, role = config.target_node) {
+    const binding = getNodeBinding(config, role);
+    return binding.output_bind_ip || binding.local_bind_ip || "";
+}
+
+function getEffectiveInputBind(config, role = config.target_node) {
+    return getExplicitInputBind(config, role) || config.local_bind_ip || "";
+}
+
+function getEffectiveOutputBind(config, role = config.target_node) {
+    return getExplicitOutputBind(config, role) || config.local_bind_ip || "";
+}
+
+function buildNodeBindingsFromForm(existing = {}) {
+    const bindings = { ...existing };
+    [
+        ["primary", "primaryInputBindIp", "primaryOutputBindIp"],
+        ["backup", "backupNodeInputBindIp", "backupNodeOutputBindIp"]
+    ].forEach(([role, inputId, outputId]) => {
+        const inputBind = document.getElementById(inputId).value.trim();
+        const outputBind = document.getElementById(outputId).value.trim();
+        const previous = bindings[role] || {};
+        if (inputBind || outputBind || previous.local_bind_ip) {
+            bindings[role] = {
+                ...previous,
+                input_bind_ip: inputBind || null,
+                output_bind_ip: outputBind || null
+            };
+        } else {
+            delete bindings[role];
+        }
+    });
+    return bindings;
+}
+
+function interfaceLabel(item) {
+    return `${item.label || item.id || item.ip} (${item.ip})`;
+}
+
+function matchingInterfaces(role, direction) {
+    return interfaceInventory.filter(item => {
+        const roles = item.node_roles || [];
+        const directions = item.directions || [];
+        return roles.includes(role) && directions.includes(direction);
+    });
+}
+
+function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
+    const select = document.getElementById(selectId);
+    const options = matchingInterfaces(role, direction);
+    select.innerHTML = "";
+
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "Default / not bound";
+    select.appendChild(emptyOption);
+
+    options.forEach(item => {
+        const option = document.createElement("option");
+        option.value = item.ip;
+        option.textContent = interfaceLabel(item);
+        select.appendChild(option);
+    });
+
+    if (selectedIp && !options.some(item => item.ip === selectedIp)) {
+        const preserved = document.createElement("option");
+        preserved.value = selectedIp;
+        preserved.textContent = `Existing interface (${selectedIp})`;
+        select.appendChild(preserved);
+    }
+
+    select.value = selectedIp || "";
+}
+
+function populateAllInterfaceSelects(config = {}) {
+    populateInterfaceSelect("primaryInputBindIp", "primary", "input", getExplicitInputBind(config, "primary"));
+    populateInterfaceSelect("primaryOutputBindIp", "primary", "output", getExplicitOutputBind(config, "primary"));
+    populateInterfaceSelect("backupNodeInputBindIp", "backup", "input", getExplicitInputBind(config, "backup"));
+    populateInterfaceSelect("backupNodeOutputBindIp", "backup", "output", getExplicitOutputBind(config, "backup"));
+}
+
+function populateBindingFields(config) {
+    populateAllInterfaceSelects(config);
 }
 
 function buildDestinationUrlFromFields() {
@@ -109,6 +244,13 @@ function buildDestinationUrlFromFields() {
         const path = normalizePath(document.getElementById("destinationPath").value.trim());
         const key = document.getElementById("destinationKey").value.trim();
         return `rtmp://${host}:${port}${path}${key ? normalizePath(key) : ""}`;
+    }
+
+    if (builder === "udp") {
+        return appendQuery(`udp://${host}:${port}`, {
+            ttl: document.getElementById("destinationTtl").value,
+            pkt_size: document.getElementById("destinationPktSize").value
+        });
     }
 
     return appendQuery(`srt://${host}:${port}`, {
@@ -130,6 +272,9 @@ function setDestinationBuilderVisibility() {
     document.querySelectorAll(".destination-srt-field").forEach(el => {
         el.style.display = protocol === "srt" ? "grid" : "none";
     });
+    document.querySelectorAll(".destination-udp-field").forEach(el => {
+        el.style.display = protocol === "udp" ? "grid" : "none";
+    });
 }
 
 function populateDestinationBuilder(destinationUrl) {
@@ -142,6 +287,8 @@ function populateDestinationBuilder(destinationUrl) {
     document.getElementById("destinationStreamid").value = "";
     document.getElementById("destinationPassphrase").value = "";
     document.getElementById("destinationPbkeylen").value = "";
+    document.getElementById("destinationTtl").value = "";
+    document.getElementById("destinationPktSize").value = "";
 
     try {
         const url = new URL(destinationUrl);
@@ -160,6 +307,12 @@ function populateDestinationBuilder(destinationUrl) {
             document.getElementById("destinationStreamid").value = url.searchParams.get("streamid") || "";
             document.getElementById("destinationPassphrase").value = url.searchParams.get("passphrase") || "";
             document.getElementById("destinationPbkeylen").value = url.searchParams.get("pbkeylen") || "";
+        } else if (url.protocol === "udp:") {
+            document.getElementById("destinationBuilderProtocol").value = "udp";
+            document.getElementById("destinationHost").value = url.hostname;
+            document.getElementById("destinationPort").value = url.port;
+            document.getElementById("destinationTtl").value = url.searchParams.get("ttl") || "";
+            document.getElementById("destinationPktSize").value = url.searchParams.get("pkt_size") || "";
         }
     } catch {
         document.getElementById("destinationBuilderProtocol").value = "raw";
@@ -170,6 +323,35 @@ function populateDestinationBuilder(destinationUrl) {
 function syncDestinationUrlPreview() {
     const builder = document.getElementById("destinationBuilderProtocol").value;
     if (builder !== "raw") document.getElementById("destinationUrl").value = buildDestinationUrlFromFields();
+}
+
+function setSourceProtocolVisibility() {
+    const protocol = document.getElementById("sourceProtocol").value;
+    const isHls = protocol === "hls";
+
+    document.querySelectorAll(".source-network-field").forEach(el => {
+        el.style.display = isHls ? "none" : "";
+    });
+    document.querySelectorAll(".source-hls-field").forEach(el => {
+        el.style.display = isHls ? "flex" : "none";
+    });
+    document.querySelectorAll(".source-rtmp-field").forEach(el => {
+        el.style.display = protocol === "rtmp" ? "flex" : "none";
+    });
+
+    document.getElementById("sourceIp").required = !isHls;
+    document.getElementById("sourcePort").required = !isHls;
+    document.getElementById("sourceUrl").required = isHls;
+}
+
+function setHlsControlVisibility() {
+    const fullEnabled = document.getElementById("enableFullHls").checked;
+    document.getElementById("fullHlsBufferRow").style.display = fullEnabled ? "grid" : "none";
+}
+
+function syncDestinationRequired() {
+    const hlsEnabled = document.getElementById("enableHlsPreview").checked || document.getElementById("enableFullHls").checked;
+    document.getElementById("destinationUrl").required = !hlsEnabled;
 }
 
 function serviceStatusLabel(status) {
@@ -194,6 +376,22 @@ function urlDisplayHtml(label, url) {
             </button>
         </div>
     `;
+}
+
+function hlsOutputLinksHtml(config, previewIdPath) {
+    const outputs = getHlsOutputs(config);
+    const links = [];
+    if (outputs.low_res.enabled) {
+        links.push(["Low HLS", `/previews/${previewIdPath}/low_res/stream.m3u8`]);
+    }
+    if (outputs.full_res.enabled) {
+        links.push(["Full HLS", `/previews/${previewIdPath}/full_res/stream.m3u8`]);
+    }
+    return links.map(([label, path]) => `
+        <button class="copy-hls-btn" type="button" data-action="copy" data-copy="${escapeHtml(window.location.origin + path)}" title="Copy ${escapeHtml(label)} HLS link">
+            <i class="fa-solid fa-link"></i> ${escapeHtml(label)}
+        </button>
+    `).join("");
 }
 
 function renderServices(services) {
@@ -221,7 +419,10 @@ function renderServices(services) {
         const fullSourceUrl = buildFullSourceUrl(c);
         const fullBackupSourceUrl = c.backup_input_ip ? buildFullSourceUrl(c, true) : "";
         const destinationUrl = c.destination_url || "";
+        const hlsLinksHtml = hlsOutputLinksHtml(c, previewIdPath);
         const targetNode = escapeHtml(c.target_node || "");
+        const inputBind = escapeHtml(getEffectiveInputBind(c));
+        const outputBind = escapeHtml(getEffectiveOutputBind(c));
         const errorMsg = s.error_msg || "";
 
         let actionsHtml = "";
@@ -255,11 +456,12 @@ function renderServices(services) {
                 ${fullBackupSourceUrl ? urlDisplayHtml("Backup", fullBackupSourceUrl) : ""}
             </td>
             <td class="url-cell">
-                ${urlDisplayHtml("Destination", destinationUrl)}
+                ${destinationUrl ? urlDisplayHtml("Destination", destinationUrl) : `<span style="color:var(--text-muted);font-size:0.78rem;">HLS local output only</span>`}
             </td>
             <td>
                 <div class="status-badge" style="background: ${s.active_input === "main" ? "rgba(94,106,210,0.2)" : "rgba(32,201,151,0.2)"}; color: ${s.active_input === "main" ? "var(--primary)" : "var(--accent)"}; margin-bottom:6px;">${activeInput.toUpperCase()} FEED</div>
                 <div ${hideNodeInfo} style="font-size: 0.7rem; font-weight:600; color: ${nodeColor}; margin-bottom:4px;"><i class="fa-solid fa-server"></i> ${targetNode.toUpperCase()} NODE</div>
+                ${(inputBind || outputBind) ? `<div class="binding-summary" title="Target node binding. Active owner may differ during failover. Input: ${inputBind || "default"} | Output: ${outputBind || "default"}"><i class="fa-solid fa-network-wired"></i> TARGET IN ${inputBind || "default"} / OUT ${outputBind || "default"}</div>` : ""}
                 <div style="font-size: 0.75rem; color: var(--text-muted); font-weight:600;">${c.auto_failover ? '<i class="fa-solid fa-shield" style="color:var(--accent);"></i> Auto-Switch ON' : 'Manual Switch'} ${c.strict_probing ? '&bull; <span style="color:var(--danger);"><i class="fa-solid fa-magnifying-glass-chart"></i> Strict Watch</span>' : ''}</div>
             </td>
             <td>
@@ -273,7 +475,7 @@ function renderServices(services) {
                         <div style="color: rgba(255,255,255,0.1);"><i class="fa-solid fa-video-slash" style="font-size:1.5rem;"></i></div>
                     `}
                 </div>
-                ${c.enable_hls_preview ? `<div style="text-align:center; margin-top:8px;"><button class="copy-hls-btn" type="button" data-action="copy" data-copy="${escapeHtml(window.location.origin + `/previews/${previewIdPath}/stream.m3u8`)}" title="Copy HLS link"><i class="fa-solid fa-link"></i> Copy HLS Link</button></div>` : ""}
+                ${hlsLinksHtml ? `<div class="hls-link-list">${hlsLinksHtml}</div>` : ""}
             </td>
             <td>
                 <div class="td-actions">
@@ -367,7 +569,16 @@ function closeModal(id) {
     document.getElementById("modalTitle").innerText = "Create New Service";
     document.getElementById("advancedOptions").style.display = "none";
     populateDestinationBuilder("");
+    populateBindingFields({});
+    setSourceProtocolVisibility();
+    setHlsControlVisibility();
+    syncDestinationRequired();
 }
+
+document.getElementById("sourceProtocol").addEventListener("change", setSourceProtocolVisibility);
+document.getElementById("enableFullHls").addEventListener("change", setHlsControlVisibility);
+document.getElementById("enableHlsPreview").addEventListener("change", syncDestinationRequired);
+document.getElementById("enableFullHls").addEventListener("change", syncDestinationRequired);
 
 document.getElementById("destinationBuilderProtocol").addEventListener("change", () => {
     setDestinationBuilderVisibility();
@@ -382,7 +593,9 @@ document.getElementById("destinationBuilderProtocol").addEventListener("change",
     "destinationMode",
     "destinationStreamid",
     "destinationPassphrase",
-    "destinationPbkeylen"
+    "destinationPbkeylen",
+    "destinationTtl",
+    "destinationPktSize"
 ].forEach(id => document.getElementById(id).addEventListener("input", syncDestinationUrlPreview));
 
 document.getElementById("serviceForm").addEventListener("submit", async (e) => {
@@ -392,20 +605,32 @@ document.getElementById("serviceForm").addEventListener("submit", async (e) => {
 
     let keylenParsed = parseInt(document.getElementById("pbkeylen").value, 10);
 
+    const existingBindings = isEdit ? (servicesMap[id].config.node_bindings || {}) : {};
+    const sourceProtocol = document.getElementById("sourceProtocol").value;
+    const sourcePortValue = document.getElementById("sourcePort").value;
+    const lowResHlsEnabled = document.getElementById("enableHlsPreview").checked;
+    const fullHlsEnabled = document.getElementById("enableFullHls").checked;
+    const destinationUrl = buildDestinationUrlFromFields();
+    if (!destinationUrl && !lowResHlsEnabled && !fullHlsEnabled) {
+        alert("Destination URL is required unless Low-Res or Full HLS output is enabled.");
+        return;
+    }
+
     const payload = {
         id: id || "",
         name: document.getElementById("serviceName").value,
-        source_protocol: document.getElementById("sourceProtocol").value,
+        source_protocol: sourceProtocol,
         source_mode: document.getElementById("sourceMode").value,
         source_ip: document.getElementById("sourceIp").value || "0.0.0.0",
-        source_port: parseInt(document.getElementById("sourcePort").value, 10),
+        source_port: sourceProtocol === "hls" ? null : parseInt(sourcePortValue, 10),
         source_path: document.getElementById("sourcePath").value,
-        destination_url: buildDestinationUrlFromFields(),
+        source_url: document.getElementById("sourceUrl").value || null,
+        destination_url: destinationUrl,
 
         target_node: document.getElementById("targetNode").value,
 
         local_bind_ip: document.getElementById("localBindIp").value || null,
-        node_bindings: isEdit ? (servicesMap[id].config.node_bindings || {}) : {},
+        node_bindings: buildNodeBindingsFromForm(existingBindings),
         latency_ms: document.getElementById("latencyMs").value ? parseInt(document.getElementById("latencyMs").value, 10) : null,
         passphrase: document.getElementById("passphrase").value || null,
         pbkeylen: keylenParsed !== 0 ? keylenParsed : null,
@@ -414,7 +639,17 @@ document.getElementById("serviceForm").addEventListener("submit", async (e) => {
         backup_input_ip: document.getElementById("backupInputIp").value || null,
         auto_failover: document.getElementById("autoFailover").checked,
         strict_probing: document.getElementById("strictProbing").checked,
-        enable_hls_preview: document.getElementById("enableHlsPreview").checked,
+        enable_hls_preview: lowResHlsEnabled,
+        hls_outputs: {
+            low_res: {
+                enabled: lowResHlsEnabled,
+                buffer_seconds: 10
+            },
+            full_res: {
+                enabled: fullHlsEnabled,
+                buffer_seconds: Math.min(24, Math.max(1, parseInt(document.getElementById("fullHlsBufferHours").value, 10) || 1)) * 3600
+            }
+        },
 
         enabled: true
     };
@@ -450,13 +685,15 @@ function editService(id) {
     document.getElementById("sourceProtocol").value = s.config.source_protocol || "srt";
     document.getElementById("sourceMode").value = s.config.source_mode || "listener";
     document.getElementById("sourceIp").value = s.config.source_ip || "0.0.0.0";
-    document.getElementById("sourcePort").value = s.config.source_port;
+    document.getElementById("sourcePort").value = s.config.source_port || "";
     document.getElementById("sourcePath").value = s.config.source_path || "";
-    document.getElementById("destinationUrl").value = s.config.destination_url;
+    document.getElementById("sourceUrl").value = s.config.source_url || "";
+    document.getElementById("destinationUrl").value = s.config.destination_url || "";
 
-    document.getElementById("targetNode").value = s.config.target_node || "worker_1";
+    document.getElementById("targetNode").value = ["primary", "backup", "all"].includes(s.config.target_node) ? s.config.target_node : "primary";
 
     document.getElementById("localBindIp").value = s.config.local_bind_ip || "";
+    populateBindingFields(s.config);
     document.getElementById("latencyMs").value = s.config.latency_ms || "";
     document.getElementById("passphrase").value = s.config.passphrase || "";
     document.getElementById("pbkeylen").value = s.config.pbkeylen || "0";
@@ -465,8 +702,14 @@ function editService(id) {
     document.getElementById("backupInputIp").value = s.config.backup_input_ip || "";
     document.getElementById("autoFailover").checked = s.config.auto_failover || false;
     document.getElementById("strictProbing").checked = s.config.strict_probing || false;
-    document.getElementById("enableHlsPreview").checked = s.config.enable_hls_preview || false;
+    const hlsOutputs = getHlsOutputs(s.config);
+    document.getElementById("enableHlsPreview").checked = hlsOutputs.low_res.enabled;
+    document.getElementById("enableFullHls").checked = hlsOutputs.full_res.enabled;
+    document.getElementById("fullHlsBufferHours").value = Math.max(1, Math.ceil((hlsOutputs.full_res.buffer_seconds || 3600) / 3600));
     populateDestinationBuilder(s.config.destination_url || "");
+    setSourceProtocolVisibility();
+    setHlsControlVisibility();
+    syncDestinationRequired();
 
     openModal("createModal");
 }
@@ -488,3 +731,7 @@ async function stopService(id) {
     await apiRequest(`${API_URL}/services/${id}/stop`, { method: "POST" }, "Stop service");
     await fetchServices();
 }
+
+setSourceProtocolVisibility();
+setHlsControlVisibility();
+syncDestinationRequired();

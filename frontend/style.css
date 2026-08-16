@@ -270,12 +270,14 @@ nav ul li.active {
     background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: 12px;
-    width: 100%;
-    max-width: 500px;
+    width: min(960px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
     box-shadow: var(--shadow);
     transform: scale(0.95);
     opacity: 0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
 }
 
 .modal-overlay.active .modal {
@@ -301,14 +303,34 @@ nav ul li.active {
 
 .close-btn:hover { color: var(--text-main); }
 
-.modal-body { padding: 24px; }
+.modal-body {
+    padding: 24px;
+    overflow-y: auto;
+}
 
 form { display: flex; flex-direction: column; gap: 16px; }
 
 .form-group { display: flex; flex-direction: column; gap: 6px; }
 .form-group-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
+@media (max-width: 760px) {
+    .form-group-row {
+        grid-template-columns: 1fr;
+    }
+}
+
 form label { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); }
+
+.form-note {
+    min-height: 38px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+    background: rgba(0,0,0,0.16);
+    font-size: 0.82rem;
+    line-height: 1.35;
+}
 
 form input {
     background: var(--bg-dark);
@@ -463,6 +485,13 @@ form input:focus { border-color: var(--primary); }
     color: var(--primary);
 }
 
+.hls-link-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 8px;
+}
+
 .error-tag {
     display: flex;
     align-items: center;
@@ -473,4 +502,36 @@ form input:focus { border-color: var(--primary); }
     color: var(--danger);
     font-size: 0.72rem;
     font-weight: 700;
+}
+
+.binding-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    background: rgba(255,255,255,0.02);
+}
+
+.binding-panel-title,
+.binding-summary {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.binding-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--accent);
+}
+
+.binding-summary {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
 }

@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, Optional
 from backend.models import ServiceConfig, ServiceState, StreamStatus
-from backend.ffmpeg_builder import build_ffmpeg_command, build_input_url
+from backend.ffmpeg_builder import build_ffmpeg_command, build_input_url, cleanup_hls_outputs
 from prometheus_client import Gauge, Counter
 import re
 
@@ -143,7 +143,7 @@ class StreamManager:
 
         logger.info(f"Connecting Active {state.active_input.upper()} Feed to stream orchestrator: {input_url}")
 
-        ffmpeg_cmd = build_ffmpeg_command(state.config, input_url, preview_dir)
+        ffmpeg_cmd = build_ffmpeg_command(state.config, input_url, preview_dir, node_role=self.node_role)
             
         try:
             process = await asyncio.create_subprocess_exec(
@@ -184,6 +184,7 @@ class StreamManager:
 
         if service_id in self.processes:
             del self.processes[service_id]
+        cleanup_hls_outputs(os.path.join("frontend", "previews", service_id))
 
     async def monitor_process(self, service_id: str):
         process = self.processes.get(service_id)

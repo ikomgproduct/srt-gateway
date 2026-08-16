@@ -7,7 +7,7 @@ import re
 import uuid
 import redis.asyncio as redis
 from backend.models import ServiceConfig
-from backend.ffmpeg_builder import build_ffmpeg_command, build_input_url
+from backend.ffmpeg_builder import build_ffmpeg_command, build_input_url, cleanup_hls_outputs
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -228,6 +228,7 @@ class WorkerNode:
             del self.processes[service_id]
             if service_id in self.state:
                 self.state[service_id]["status"] = "stopped"
+        cleanup_hls_outputs(os.path.join(PREVIEW_DIR, service_id))
         if release_lease:
             await self.release_lease(service_id)
 
@@ -249,7 +250,7 @@ class WorkerNode:
             preview_dir = os.path.join(PREVIEW_DIR, config.id)
             os.makedirs(preview_dir, exist_ok=True)
             input_url = build_input_url(config, use_backup, NODE_ROLE)
-            ffmpeg_cmd = build_ffmpeg_command(config, input_url, preview_dir)
+            ffmpeg_cmd = build_ffmpeg_command(config, input_url, preview_dir, node_role=NODE_ROLE)
             self.processes[config.id] = await asyncio.create_subprocess_exec(
                 *ffmpeg_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )

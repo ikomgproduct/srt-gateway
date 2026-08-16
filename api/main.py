@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import text
+from contextlib import asynccontextmanager, suppress
 import os
 import json
 import asyncio
@@ -12,13 +13,98 @@ from api.database import engine, Base, get_db, AsyncSessionLocal
 from api.models import ServiceModel
 from api.schemas import ServiceConfigRequest
 
-app = FastAPI(title="SRT API Gateway (Control Plane)")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup()
+    try:
+        yield
+    finally:
+        await shutdown()
+
+
+app = FastAPI(title="SRT API Gateway (Control Plane)", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 redis_client = None
+hardware_metrics_task = None
 
 DESIRED_CONFIGS_KEY = "service_configs"
 HEARTBEAT_PREFIX = "worker_heartbeat:"
+
+DEFAULT_INTERFACE_INVENTORY = [
+    {
+        "id": "primary-video-main",
+        "label": "Primary Video Main",
+        "ip": "10.70.15.3",
+        "node_roles": ["primary"],
+        "directions": ["input", "output"],
+        "network": "video",
+    },
+    {
+        "id": "backup-video-backup",
+        "label": "Backup Video Backup",
+        "ip": "10.71.15.3",
+        "node_roles": ["backup"],
+        "directions": ["input", "output"],
+        "network": "video",
+    },
+    {
+        "id": "api-management",
+        "label": "Management API/UI",
+        "ip": "10.75.51.40",
+        "node_roles": ["primary", "backup"],
+        "directions": [],
+        "network": "management",
+    },
+]
+
+
+def load_interface_inventory() -> list[dict]:
+    raw = os.getenv("INTERFACE_INVENTORY_JSON")
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return DEFAULT_INTERFACE_INVENTORY
+
+
+def full_hls_enabled(config: dict) -> bool:
+    outputs = config.get("hls_outputs") or {}
+    full_res = outputs.get("full_res") or {}
+    return bool(full_res.get("enabled"))
+
+
+def active_full_hls_enabled(config: dict) -> bool:
+    return bool(config.get("enabled", True) and full_hls_enabled(config))
+
+
+def max_full_hls_services() -> int:
+    try:
+        return max(0, int(os.getenv("MAX_FULL_HLS_SERVICES", "2")))
+    except ValueError:
+        return 2
+
+
+async def enforce_full_hls_service_limit(db: AsyncSession, data: dict, exclude_id: str | None = None) -> None:
+    if not active_full_hls_enabled(data):
+        return
+    limit = max_full_hls_services()
+    if limit == 0:
+        raise HTTPException(status_code=422, detail="Full HLS output is disabled by MAX_FULL_HLS_SERVICES=0")
+
+    result = await db.execute(select(ServiceModel))
+    count = 0
+    for service in result.scalars().all():
+        if exclude_id and service.id == exclude_id:
+            continue
+        if active_full_hls_enabled(service_to_dict(service)):
+            count += 1
+    if count >= limit:
+        raise HTTPException(status_code=422, detail=f"Full HLS service limit reached ({limit})")
 
 async def ensure_schema_columns():
     async with engine.begin() as conn:
@@ -29,6 +115,8 @@ async def ensure_schema_columns():
             await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS failover_after_seconds INTEGER DEFAULT 15"))
             await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS failback_policy VARCHAR DEFAULT 'manual'"))
             await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS node_bindings JSONB"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS source_url VARCHAR"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS hls_outputs JSONB"))
 
 def service_to_dict(service: ServiceModel) -> dict:
     data = service.__dict__.copy()
@@ -69,9 +157,8 @@ def service_has_eligible_worker(config: dict, worker_roles: set[str]) -> bool:
         return bool(worker_roles)
     return bool(eligible.intersection(worker_roles))
 
-@app.on_event("startup")
 async def startup():
-    global redis_client
+    global redis_client, hardware_metrics_task
     # Automatically generate Database Tables natively avoiding Alembic migrations for standalone deployments
     await ensure_schema_columns()
     redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost"))
@@ -79,10 +166,15 @@ async def startup():
         result = await session.execute(select(ServiceModel))
         for service in result.scalars().all():
             await sync_desired_config(service.id, service_to_dict(service))
-    asyncio.create_task(hardware_metrics_loop())
+    hardware_metrics_task = asyncio.create_task(hardware_metrics_loop())
 
-@app.on_event("shutdown")
 async def shutdown():
+    global hardware_metrics_task
+    if hardware_metrics_task:
+        hardware_metrics_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await hardware_metrics_task
+        hardware_metrics_task = None
     if redis_client:
         await redis_client.close()
 
@@ -136,12 +228,17 @@ async def get_services(db: AsyncSession = Depends(get_db)):
 async def get_workers():
     return {"workers": sorted(await get_worker_roles())}
 
+@app.get("/api/interfaces")
+async def get_interfaces():
+    return {"interfaces": load_interface_inventory()}
+
 @app.post("/api/services")
 async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
     import uuid
     data = config.model_dump()
     if not data.get("id"):
         data["id"] = str(uuid.uuid4())
+    await enforce_full_hls_service_limit(db, data)
     db_item = ServiceModel(**data)
     db.add(db_item)
     await db.commit()
@@ -157,6 +254,7 @@ async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depend
 async def update_service(service_id: str, config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
     data = config.model_dump()
     data["id"] = service_id
+    await enforce_full_hls_service_limit(db, data, exclude_id=service_id)
     await db.merge(ServiceModel(**data))
     await db.commit()
     

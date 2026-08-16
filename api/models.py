@@ -11,7 +11,8 @@ class ServiceModel(Base):
     source_ip = Column(String, default="0.0.0.0")
     source_port = Column(Integer)
     source_path = Column(String, nullable=True)
-    destination_url = Column(String)
+    source_url = Column(String, nullable=True)
+    destination_url = Column(String, default="")
     
     local_bind_ip = Column(String, nullable=True)
     node_bindings = Column(JSON, nullable=True)
@@ -24,6 +25,7 @@ class ServiceModel(Base):
     auto_failover = Column(Boolean, default=False)
     strict_probing = Column(Boolean, default=False)
     enable_hls_preview = Column(Boolean, default=False)
+    hls_outputs = Column(JSON, nullable=True)
     
     target_node = Column(String, default="worker_1")
     ha_mode = Column(String, default="manual")

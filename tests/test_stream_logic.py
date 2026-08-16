@@ -1,5 +1,9 @@
 import pytest
 
+from backend import stream_manager
+from backend.models import ServiceConfig, ServiceState
+
+
 @pytest.mark.asyncio
 async def test_strict_probing_injection(async_client):
     payload = {
@@ -29,3 +33,47 @@ async def test_strict_probing_injection(async_client):
     
     del_resp = await async_client.delete(f"/api/services/{service_id}")
     assert del_resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_legacy_stream_manager_passes_node_role_to_ffmpeg_builder(monkeypatch, tmp_path):
+    captured = {}
+
+    monkeypatch.setattr(stream_manager, "CONFIG_FILE", str(tmp_path / "config.json"))
+
+    def fake_build_ffmpeg_command(config, input_url, preview_dir, node_role="primary"):
+        captured["node_role"] = node_role
+        return ["true"]
+
+    class FakeProcess:
+        def __init__(self):
+            self.pid = 1234
+            self.returncode = None
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return FakeProcess()
+
+    async def fake_monitor_process(self, service_id):
+        return None
+
+    monkeypatch.setattr(stream_manager, "build_ffmpeg_command", fake_build_ffmpeg_command)
+    monkeypatch.setattr(stream_manager.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr(stream_manager.StreamManager, "monitor_process", fake_monitor_process)
+
+    manager = stream_manager.StreamManager()
+    manager.node_role = "backup"
+    config = ServiceConfig(
+        id="legacy-bind-test",
+        name="Legacy bind test",
+        source_protocol="srt",
+        source_mode="caller",
+        source_ip="127.0.0.1",
+        source_port=9000,
+        destination_url="udp://239.0.0.1:5000",
+        target_node="backup",
+    )
+    manager.services[config.id] = ServiceState(config=config)
+
+    await manager.start_service(config.id)
+
+    assert captured["node_role"] == "backup"
