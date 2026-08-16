@@ -49,6 +49,8 @@ Supported source protocols:
 - `RIST`
 - `HLS`
 
+For HLS sources, the network source fields are hidden and the form shows `HLS Source URL`.
+
 Common modes:
 
 - `listener`: the gateway waits for an incoming connection.
@@ -184,6 +186,14 @@ For your compose layout, both workers expose:
 
 ```text
 9000-9010/udp
+```
+
+#### HLS Source URL
+
+For HLS sources, enter the playlist URL:
+
+```text
+https://example.com/live/stream.m3u8
 ```
 
 #### Backup Source IP
@@ -336,6 +346,35 @@ The UI assembles:
 srt://10.70.20.50:9000?mode=caller&streamid=feed1
 ```
 
+### UDP Destination Builder
+
+Select:
+
+```text
+Destination Builder: UDP destination
+```
+
+Fill:
+
+- Destination Host/IP
+- Destination Port
+- UDP TTL, optional
+- UDP Packet Size, optional
+
+Example:
+
+```text
+Destination Host/IP: 239.10.10.10
+Destination Port: 5000
+UDP TTL: 16
+```
+
+The UI assembles:
+
+```text
+udp://239.10.10.10:5000?ttl=16
+```
+
 ## Worker Target Selection
 
 The `Hardware Exec Node` field controls which worker should run the service.
@@ -344,7 +383,6 @@ Options:
 
 | Option | Use Case |
 | --- | --- |
-| `worker_1` | Single-worker local/lab deployment. |
 | `primary` | Run only on the primary worker. |
 | `backup` | Run only on the backup worker. |
 | `all` | Run on all eligible workers. |
@@ -368,28 +406,24 @@ This means the service targets `primary`, but only `worker_1` is currently onlin
 
 Click `Toggle Advanced Settings (Encryption, NIC Bindings)`.
 
-### Local Network Bind Interface (IP)
+### Interface Bindings
 
-This controls the local IP FFmpeg uses for source connections.
+The UI exposes primary and backup input/output interface dropdowns populated from the configured hardware inventory.
 
-For listener-mode SRT, this can bind the listening socket to a specific video NIC.
+Fields:
 
-For caller-mode SRT, this is sent as `localaddr`.
+- Primary Input Interface
+- Primary Output Interface
+- Backup Input Interface
+- Backup Output Interface
+
+For listener-mode SRT, the input interface can bind the listening socket to a specific video NIC. For caller-mode SRT and UDP inputs, it is sent as `localaddr` where supported. For SRT/UDP destinations, the output interface is sent as destination `localaddr` where supported.
 
 For your server:
 
 ```text
 Primary worker video IP: 10.70.15.3
 Backup worker video IP: 10.71.15.3
-```
-
-Important: the current UI field is a single generic bind IP. For per-node bind mapping, the backend supports `node_bindings`, but the UI does not yet expose a dedicated editor for it.
-
-Until that UI is added, the Docker compose IP/port binding already protects listener ports per worker:
-
-```text
-primary -> 10.70.15.3:9000-9010/udp
-backup  -> 10.71.15.3:9000-9010/udp
 ```
 
 ### SRT Latency

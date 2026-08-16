@@ -131,7 +131,8 @@ Known architecture gaps:
 Guardrails:
 
 - `MAX_FULL_HLS_SERVICES` limits active Full HLS services.
-- Disabled Full HLS service templates do not consume `MAX_FULL_HLS_SERVICES` capacity.
+- Disabled Full HLS service templates do not consume `MAX_FULL_HLS_SERVICES` capacity until start or enable time.
+- `/api/services/{id}/start` validates Full HLS capacity before marking a service enabled.
 - `HLS_MIN_FREE_BYTES` enforces a minimum free-space check before HLS startup.
 - `HLS_STORAGE_QUOTA_BYTES` optionally blocks estimated HLS storage above a configured quota.
 - Generated `low_res` and `full_res` directories are removed on service stop.
@@ -144,6 +145,8 @@ Guardrails:
 - Bind API/UI and Grafana only to management IPs.
 - Keep Redis/Postgres internal for single-server deployments.
 - Expose Redis/Postgres on management network only when multi-server HA requires it.
+- Production `shared_previews` storage is disk-backed and sized operationally; small tmpfs preview storage is suitable only for lab/thumbnail use.
+- Production compose carries explicit `MAX_FULL_HLS_SERVICES`, `HLS_MIN_FREE_BYTES`, and `HLS_STORAGE_QUOTA_BYTES` defaults.
 
 ## Testing
 
@@ -163,7 +166,7 @@ Important coverage areas:
 - Worker routing and active/passive targeting.
 - Legacy `StreamManager` node-role propagation into FFmpeg command building.
 
-Last verified result after rebuild: `55 passed` with no pytest warning summary.
+Last verified result after rebuild: `56 passed` with no pytest warning summary.
 
 ## Operational Caveats
 

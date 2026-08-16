@@ -172,6 +172,38 @@ async def test_full_hls_limit_counts_enabled_services_only(async_client, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_start_rejects_full_hls_when_service_limit_is_reached(async_client, monkeypatch):
+    monkeypatch.setenv("MAX_FULL_HLS_SERVICES", "1")
+    payload = {
+        "name": "Full HLS template 1",
+        "source_protocol": "srt",
+        "source_ip": "127.0.0.1",
+        "source_port": 9901,
+        "destination_url": "",
+        "hls_outputs": {
+            "low_res": {"enabled": False, "buffer_seconds": 10},
+            "full_res": {"enabled": True, "buffer_seconds": 3600},
+        },
+        "enabled": False,
+    }
+
+    first = await async_client.post("/api/services", json=payload)
+    assert first.status_code == 200
+
+    payload["name"] = "Full HLS template 2"
+    payload["source_port"] = 9902
+    second = await async_client.post("/api/services", json=payload)
+    assert second.status_code == 200
+
+    first_start = await async_client.post(f"/api/services/{first.json()['id']}/start")
+    assert first_start.status_code == 200
+
+    second_start = await async_client.post(f"/api/services/{second.json()['id']}/start")
+    assert second_start.status_code == 422
+    assert "Full HLS service limit reached" in second_start.text
+
+
+@pytest.mark.asyncio
 async def test_rejects_invalid_key_size(async_client):
     payload = {
         "name": "Invalid key",

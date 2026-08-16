@@ -278,11 +278,13 @@ async def delete_service(service_id: str, db: AsyncSession = Depends(get_db)):
 async def start_service(service_id: str, use_backup: bool = False, db: AsyncSession = Depends(get_db)):
     item = await db.get(ServiceModel, service_id)
     if not item: raise HTTPException(404)
+    candidate = service_to_dict(item)
+    candidate["enabled"] = True
+    await enforce_full_hls_service_limit(db, candidate, exclude_id=service_id)
     item.enabled = True
     await db.commit()
     
-    d = item.__dict__.copy()
-    d.pop("_sa_instance_state", None)
+    d = service_to_dict(item)
     await sync_desired_config(service_id, d)
     await redis_client.publish("stream_commands", json.dumps({
         "action": "start", 

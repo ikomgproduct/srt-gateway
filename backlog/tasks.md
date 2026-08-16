@@ -58,10 +58,12 @@ Acceptance:
 Implementation notes:
 
 - `MAX_FULL_HLS_SERVICES` limits simultaneous full HLS services.
-- Disabled Full HLS service templates do not count against `MAX_FULL_HLS_SERVICES`.
+- Disabled Full HLS service templates do not count against `MAX_FULL_HLS_SERVICES` until start or enable time.
+- `/api/services/{id}/start` rejects starting a disabled Full HLS template when the active/intended service limit is already reached.
 - `HLS_MIN_FREE_BYTES` blocks HLS startup when free space is too low.
 - `HLS_STORAGE_QUOTA_BYTES` can reject oversized estimated HLS storage.
 - Generated `low_res` and `full_res` HLS output directories are cleaned when services stop.
+- Production compose now uses disk-backed `shared_previews` storage and carries explicit HLS guardrail environment defaults.
 
 ### 3. Correct HLS Master Playlist Metadata
 

@@ -26,6 +26,9 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://srt_user:srt_pass@db:5432/srt_db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
+      - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
+      - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
       - PYTHONUNBUFFERED=1
     volumes:
       - shared_previews:/app/frontend/previews
@@ -40,6 +43,9 @@ services:
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - NODE_ROLE=primary
+      - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
+      - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
+      - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
       - PYTHONUNBUFFERED=1
     volumes:
       - shared_previews:/app/frontend/previews
@@ -54,6 +60,9 @@ services:
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - NODE_ROLE=backup
+      - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
+      - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
+      - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
       - PYTHONUNBUFFERED=1
     volumes:
       - shared_previews:/app/frontend/previews
@@ -94,7 +103,3 @@ volumes:
   pgdata:
   grafana-storage:
   shared_previews:
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
-      o: size=500m,uid=1000

@@ -1,11 +1,11 @@
 # SRT Gateway
 
-SRT Gateway is a web-managed stream routing gateway for SRT, UDP, RTMP, and RIST sources. It runs FFmpeg pipelines from service definitions, exposes a browser UI/API, publishes metrics, and supports worker-node redundancy for broadcast-style deployments.
+SRT Gateway is a web-managed stream routing gateway for SRT, UDP, RTMP, RIST, and HLS sources. It runs FFmpeg pipelines from service definitions, exposes a browser UI/API, publishes metrics, and supports worker-node redundancy for broadcast-style deployments.
 
 ## What It Does
 
 - Creates and manages stream routing services from a web UI or REST API.
-- Supports SRT, UDP, RTMP, and RIST inputs.
+- Supports SRT, UDP, RTMP, RIST, and HLS inputs.
 - Supports SRT, UDP, RTMP/RTMPS, and RIST destinations.
 - Runs FFmpeg workers separately from the API in microservice deployments.
 - Publishes runtime state through Redis and Prometheus-compatible telemetry.
@@ -105,6 +105,8 @@ Per-node field for redundant installations:
 When the `primary` node owns the service, FFmpeg uses the primary binding. When the `backup` node owns the service, FFmpeg uses the backup binding.
 
 If `node_bindings` does not contain the active node, the system falls back to legacy `local_bind_ip`. New services should prefer explicit input/output bindings.
+
+The UI populates primary/backup input/output binding dropdowns from `/api/interfaces`. Production deployments can override the built-in interface list with `INTERFACE_INVENTORY_JSON`.
 
 ## Redundancy Model
 
@@ -414,10 +416,13 @@ Thumbnail:
 Optional HLS playlist:
 
 ```text
-/previews/<service_id>/stream.m3u8
+/previews/<service_id>/low_res/stream.m3u8
+/previews/<service_id>/full_res/stream.m3u8
 ```
 
 In microservice deployments, the API and workers share this path through the `shared_previews` Docker volume.
+
+Low-res HLS writes 360p and 480p renditions. Full HLS writes 720p and 1080p renditions and can keep up to 24 hours of local buffer.
 
 ## Metrics
 
@@ -486,6 +491,8 @@ docker compose -f docker-compose-microservices.yml exec -T api python -m pytest 
 - Workers heartbeat into Redis.
 - A worker stops its local FFmpeg process if it loses its lease.
 - Existing Postgres databases get missing HA columns added during API startup.
+- Full HLS capacity is limited by `MAX_FULL_HLS_SERVICES`. Disabled Full HLS templates do not count until they are started or otherwise enabled.
+- HLS startup checks `HLS_MIN_FREE_BYTES` and optionally rejects oversized estimated buffers with `HLS_STORAGE_QUOTA_BYTES`.
 
 ## Production Caveats
 
@@ -493,8 +500,8 @@ docker compose -f docker-compose-microservices.yml exec -T api python -m pytest 
 - Redis is currently exposed on host port `6379` in compose. Restrict this on real networks.
 - For true two-server HA, Redis/Postgres must themselves be reliable and reachable on the management network.
 - For one-server two-worker HA, duplicate UDP host ports require either separate video IPs/NICs or shifted host port mappings.
+- Production HLS output should use disk-backed `shared_previews` storage sized for the expected buffer duration. A small tmpfs preview volume is suitable only for thumbnails or lab use.
 - Automatic failback should be treated carefully. Manual failback avoids stream flapping.
-- The UI currently preserves `node_bindings`, but a dedicated editor for per-node video NIC assignment is still a recommended future improvement.
 
 ## Useful Docker Commands
 
