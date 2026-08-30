@@ -133,7 +133,18 @@ Available buttons:
 
 Click `New Service`.
 
-### Basic Fields
+The create/edit modal is organized into:
+
+- Basics
+- Source
+- Destination
+- HLS Output
+- Worker Target And Bindings
+- Advanced Compatibility
+
+The form is protocol-aware. When you change the source or destination protocol, unrelated fields are hidden.
+
+### Basics
 
 #### Service Name
 
@@ -142,6 +153,16 @@ Enter a clear name, for example:
 ```text
 Studio A Main Encoder
 ```
+
+#### Hardware Exec Node
+
+Choose which worker role should run the service:
+
+- `primary`: primary worker only
+- `backup`: backup worker only
+- `all`: all eligible workers
+
+### Source
 
 #### Source Protocol
 
@@ -155,7 +176,7 @@ Select the input protocol:
 
 #### Source Mode
 
-Choose:
+For SRT, RTMP, and RIST sources, choose:
 
 - `Listener`: gateway listens for the source.
 - `Caller`: gateway connects to the source.
@@ -169,7 +190,18 @@ Main Source IP: 0.0.0.0
 Source Port: 9000
 ```
 
-#### Main Source IP
+#### UDP Type
+
+For UDP sources, choose:
+
+- `Unicast`
+- `Multicast`
+
+#### Input Interface
+
+For network sources, choose the input interface from the dropdown. The list comes from the configured hardware inventory.
+
+#### Source Address
 
 For listener mode, usually use:
 
@@ -197,28 +229,18 @@ For HLS sources, enter the playlist URL:
 https://example.com/live/stream.m3u8
 ```
 
-#### Backup Source IP
+#### SRT Parameters
 
-Optional. Use this for input-level source failover, not worker failover.
+For SRT sources, the UI exposes latency, receive buffer, passphrase, and Stream ID controls.
 
-Example:
+Stream ID has two modes:
 
-```text
-Main Source IP: 10.70.20.10
-Backup Source IP: 10.71.20.10
-```
+- `Default builder`: stores structured Stream ID fields for future routing templates.
+- `Custom raw value`: stores a raw Stream ID and also fills the legacy `streamid` field for the current worker path.
 
-#### Auto Feed Failover
+The SRT key size (`pbkeylen`) remains in `Advanced Compatibility` because it is a legacy top-level field, not part of the structured Route Editor V2 SRT object.
 
-When enabled, the worker can switch between main and backup input after FFmpeg/input failure.
-
-This is different from active/passive worker failover.
-
-#### Strict Health Probing
-
-Enables more aggressive detection of stream problems such as missing video or continuity errors.
-
-Use carefully. It can restart bad feeds faster, but unstable sources may flap more often.
+### HLS Output
 
 #### Enable Low-Res HLS Output
 
@@ -234,7 +256,54 @@ Creates local 720p and 1080p HLS outputs for the service.
 
 Full HLS can use significant CPU/GPU and disk capacity. The buffer duration is configurable up to 24 hours.
 
-When low-res or full HLS output is enabled, the normal destination URL can be left empty.
+When low-res or full HLS output is enabled, normal destination output can be disabled for an HLS-only route.
+
+### Worker Target And Bindings
+
+#### Auto Feed Failover
+
+When enabled, the worker can switch between main and backup input after FFmpeg/input failure.
+
+This is different from active/passive worker failover.
+
+#### Strict Health Probing
+
+Enables more aggressive detection of stream problems such as missing video or continuity errors.
+
+Use carefully. It can restart bad feeds faster, but unstable sources may flap more often.
+
+#### Interface Bindings
+
+The UI exposes primary and backup input/output interface dropdowns populated from the configured hardware inventory.
+
+Fields:
+
+- Primary Input Interface
+- Primary Output Interface
+- Backup Input Interface
+- Backup Output Interface
+
+For listener-mode SRT, the input interface can bind the listening socket to a specific video NIC. For caller-mode SRT and UDP inputs, it is sent as `localaddr` where supported. For SRT/UDP destinations, the output interface is sent as destination `localaddr` where supported.
+
+For your server:
+
+```text
+Primary worker video IP: 10.70.15.3
+Backup worker video IP: 10.71.15.3
+```
+
+### Compatibility Notes
+
+#### Backup Source IP
+
+Optional. Use this for input-level source failover, not worker failover.
+
+Example:
+
+```text
+Main Source IP: 10.70.20.10
+Backup Source IP: 10.71.20.10
+```
 
 ## RTMP Source Path
 
@@ -265,14 +334,16 @@ rtmp://54.235.122.142:1935/Jungotv/AWSN03
 
 ## Destination Configuration
 
-You can either type a raw destination URL or use the Destination Builder.
+Use the `Destination` section to enable or disable normal destination output and select the destination protocol.
+
+If low-res or full HLS output is enabled, you can uncheck `Enable normal destination output` to create an HLS-only local output route.
 
 ### Raw Destination URL
 
 Select:
 
 ```text
-Destination Builder: Use URL field directly
+Destination Protocol: Raw URL
 ```
 
 Then enter the destination URL manually.
@@ -290,7 +361,7 @@ Supported destination prefixes:
 Select:
 
 ```text
-Destination Builder: RTMP destination
+Destination Protocol: RTMP destination
 ```
 
 Fill:
@@ -320,25 +391,26 @@ rtmp://live.example.com:1935/live/abc123
 Select:
 
 ```text
-Destination Builder: SRT destination
+Destination Protocol: SRT destination
 ```
 
 Fill:
 
-- Destination Host/IP
+- Output Interface
+- Destination Address
 - Destination Port
 - SRT Mode
-- SRT Stream ID, optional
+- SRT Stream ID mode and fields
 - SRT Passphrase, optional
-- SRT Key Size, optional
 
 Example:
 
 ```text
-Destination Host/IP: 10.70.20.50
+Destination Address: 10.70.20.50
 Destination Port: 9000
 SRT Mode: Caller
-SRT Stream ID: feed1
+Destination Stream ID Mode: Custom raw value
+Custom Destination Stream ID: feed1
 ```
 
 The UI assembles:
@@ -347,25 +419,35 @@ The UI assembles:
 srt://10.70.20.50:9000?mode=caller&streamid=feed1
 ```
 
+#### SRT Path Redundancy
+
+For SRT destinations, `Enable manual path redundancy` adds a secondary output interface, address, and port to the structured service config.
+
+This does not move the service between workers by itself. Worker ownership is still controlled by `Hardware Exec Node`, HA fields, and Redis leases.
+
 ### UDP Destination Builder
 
 Select:
 
 ```text
-Destination Builder: UDP destination
+Destination Protocol: UDP destination
 ```
 
 Fill:
 
-- Destination Host/IP
+- UDP Type
+- Output Interface
+- Destination Address
 - Destination Port
 - UDP TTL, optional
-- UDP Packet Size, optional
+- UDP MTU, optional
+- UDP ToS, optional
+- Max Bitrate, optional
 
 Example:
 
 ```text
-Destination Host/IP: 239.10.10.10
+Destination Address: 239.10.10.10
 Destination Port: 5000
 UDP TTL: 16
 ```
@@ -375,6 +457,16 @@ The UI assembles:
 ```text
 udp://239.10.10.10:5000?ttl=16
 ```
+
+### RIST Destination
+
+Select:
+
+```text
+Destination Protocol: RIST destination
+```
+
+Fill the output interface, destination address, and destination port. Advanced RIST-specific options are not exposed in this UI slice.
 
 ## Worker Target Selection
 
@@ -403,47 +495,9 @@ No eligible worker online. Service targets: primary. Online workers: worker_1.
 
 This means the service targets `primary`, but only `worker_1` is currently online.
 
-## Advanced Settings
+## Advanced Compatibility
 
-Click `Toggle Advanced Settings (Encryption, NIC Bindings)`.
-
-### Interface Bindings
-
-The UI exposes primary and backup input/output interface dropdowns populated from the configured hardware inventory.
-
-Fields:
-
-- Primary Input Interface
-- Primary Output Interface
-- Backup Input Interface
-- Backup Output Interface
-
-For listener-mode SRT, the input interface can bind the listening socket to a specific video NIC. For caller-mode SRT and UDP inputs, it is sent as `localaddr` where supported. For SRT/UDP destinations, the output interface is sent as destination `localaddr` where supported.
-
-For your server:
-
-```text
-Primary worker video IP: 10.70.15.3
-Backup worker video IP: 10.71.15.3
-```
-
-### SRT Latency
-
-Sets SRT latency in milliseconds.
-
-Common starting values:
-
-```text
-120
-250
-500
-```
-
-### SRT Passphrase
-
-Sets the SRT encryption passphrase.
-
-Only use when the sender/receiver is configured with the same passphrase.
+Click `Advanced Compatibility`.
 
 ### SRT Key Size
 
@@ -454,11 +508,13 @@ Choose:
 - 24 Bytes, 192-bit
 - 32 Bytes, 256-bit
 
+This is submitted as legacy top-level `pbkeylen` for current worker compatibility.
+
 ### SRT Stream ID
 
 Optional SRT routing identifier.
 
-Use this when the remote SRT system requires stream IDs for routing or authentication.
+The structured source/destination Stream ID controls should be used for new services. The legacy field is preserved for compatibility with older service records.
 
 ## Editing A Service
 
@@ -517,9 +573,11 @@ Deleting a service removes the configuration and sends a stop command to workers
 ```text
 Source Protocol: SRT
 Source Mode: Listener
-Main Source IP: 0.0.0.0
+Source Address: 0.0.0.0
 Source Port: 9000
-Destination URL: udp://239.10.10.10:5000
+Destination Protocol: UDP destination
+Destination Address: 239.10.10.10
+Destination Port: 5000
 Hardware Exec Node: primary
 ```
 
@@ -536,9 +594,11 @@ because the primary worker ports are bound to `10.70.15.3`.
 ```text
 Source Protocol: SRT
 Source Mode: Listener
-Main Source IP: 0.0.0.0
+Source Address: 0.0.0.0
 Source Port: 9000
-Destination URL: udp://239.10.10.10:5000
+Destination Protocol: UDP destination
+Destination Address: 239.10.10.10
+Destination Port: 5000
 Hardware Exec Node: backup
 ```
 

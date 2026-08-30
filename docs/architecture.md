@@ -130,7 +130,7 @@ Possible future shape:
 }
 ```
 
-This shape is implemented as an additive API/backend contract for the first Route Editor V2 slice. UI rebuild and broader FFmpeg/runtime mapping remain future work.
+This shape is implemented as an additive API/backend contract and the browser UI now submits this structure while preserving legacy flat fields. Broader FFmpeg/runtime mapping remains future work.
 
 ### Route Editor V2 Technical Plan
 
@@ -139,14 +139,14 @@ Current shape:
 - `ServiceConfigRequest` in `api/schemas.py` preserves flat fields and also accepts structured `source` and `destinations`.
 - HLS output and node bindings are already structured.
 - `backend/ffmpeg_builder.py` builds input URLs from flat source fields and emits a single normal destination URL plus preview/HLS outputs.
-- `frontend/app.js` serializes a single service form into the flat API contract, with a lightweight destination URL builder.
+- `frontend/app.js` serializes the Route Editor V2 form into structured `source` and one enabled normal `destinations[]` object, while also submitting legacy flat compatibility fields for the current worker path.
 
 Proposed change:
 
 - Structured route objects were added to the API contract without removing existing flat fields.
 - Existing services remain valid and Redis/Postgres configs keep worker-compatible flat fields.
 - `api/route_normalizer.py` normalizes flat and structured payloads at the API boundary before persistence and Redis sync.
-- Move the frontend toward protocol-specific form state, then serialize both structured config and legacy compatibility fields during the transition.
+- Keep the frontend protocol-specific form state, structured serialization, and legacy compatibility serialization aligned during the transition.
 
 Files likely affected:
 
@@ -193,6 +193,8 @@ Current implementation notes:
 - Structured HLS source derives `source_protocol=hls`, `source_url`, and `source_port=None`.
 - Structured SRT/UDP source and destination payloads derive flat compatibility fields.
 - Existing flat payloads are normalized into structured objects for API response and Redis desired config.
+- The Route Editor V2 UI hydrates structured `source` / `destinations` first and falls back to legacy flat fields for existing services.
+- `pbkeylen` remains top-level legacy compatibility only. It is intentionally not part of structured `SrtParameters` and must not be serialized inside `source.srt` or `destinations[].srt` without a separate schema change.
 
 FFmpeg mapping:
 
@@ -210,9 +212,9 @@ Incremental implementation order:
 
 1. Add schema models and normalization helpers with tests; no UI behavior change.
 2. Add backend FFmpeg builder support for normalized source/destination while preserving flat behavior.
-3. Add frontend Route Editor V2 sections for UDP and SRT source/destination.
-4. Add Stream ID builder and edit hydration.
-5. Add path redundancy UI/API behavior.
+3. Add frontend Route Editor V2 sections for UDP and SRT source/destination. Done.
+4. Add Stream ID builder and edit hydration. Done.
+5. Add path redundancy UI/API behavior. UI and API persistence done; runtime failover behavior remains future work.
 6. Add regression tests and QA scenarios using sample FFmpeg sources.
 7. Update README/UI guide after behavior is implemented and reviewed.
 
@@ -331,7 +333,7 @@ Important coverage areas:
 - Worker routing and active/passive targeting.
 - Legacy `StreamManager` node-role propagation into FFmpeg command building.
 
-Last verified result after API image rebuild and installing `requirements-test.txt` in the running API container: `73 passed` with no pytest warning summary.
+Last verified result after API image rebuild and installing `requirements-test.txt` in the running API container: `79 passed` with no pytest warning summary.
 
 Latest production compose validation rendered successfully for single-server, control-plane, primary-worker, and backup-worker env examples.
 

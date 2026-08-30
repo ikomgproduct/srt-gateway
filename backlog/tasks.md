@@ -109,11 +109,11 @@ Implementation notes:
 - Dev Lead review fixes added: enabled structured destinations now require a usable target, and enabled path redundancy now requires manual mode plus a secondary endpoint with a port.
 - Added `tests/test_route_editor_v2_contract.py`.
 - QA added the Dev Lead suggested path-redundancy mode regression test.
-- Verification: rebuilt API image, installed `requirements-test.txt` in the running API container, and ran `docker compose -f docker-compose-microservices.yml exec -T api python -m pytest`; result `73 passed`.
+- Verification: rebuilt API image, installed `requirements-test.txt` in the running API container, and ran `docker compose -f docker-compose-microservices.yml exec -T api python -m pytest`; latest result `79 passed`.
 
 ### 9. Implement Route Editor V2 UI
 
-Status: Architect Handoff Ready
+Status: Implemented - Ready For Review
 
 Goal:
 
@@ -140,6 +140,17 @@ Implementation notes:
 - Architect handoff is captured in `docs/route-editor-v2-ui-architect-handoff.md`.
 - Keep this item frontend-focused; backend FFmpeg structured mapping remains backlog item 10.
 - The UI should serialize structured `source` and `destinations` while preserving flat compatibility fields for current workers.
+- Implemented Route Editor V2 modal sections: Basics, Source, Destination, HLS Output, Worker Target And Bindings, and Advanced Compatibility.
+- Source protocol visibility now covers SRT, UDP, RTMP, RIST, and HLS.
+- Destination protocol visibility now covers SRT, UDP, RTMP, RTMPS, RIST, and raw URL compatibility.
+- Added UDP unicast/multicast controls, SRT listener/caller controls, default/custom Stream ID controls, and SRT destination manual path redundancy fields.
+- Submit payload now includes structured `source` and one enabled normal `destinations[]` object plus legacy flat compatibility fields.
+- Edit hydration prefers structured `source` / `destinations` and falls back to flat legacy values.
+- `pbkeylen` is submitted only as top-level legacy compatibility, not inside structured `source.srt` or `destinations[].srt`.
+- QA browser cache finding fixed by version-tagging `style.css` and `app.js` in `frontend/index.html`.
+- QA mobile grid overflow finding fixed by removing the inline `hardwareNodeRow` two-column override and keeping the dashboard/modal layout responsive through CSS.
+- Reviewer compatibility findings fixed by preserving existing legacy target nodes during edit and preventing hidden legacy Stream ID values from leaking into non-custom/non-SRT submissions.
+- Verification: `docker compose -f docker-compose-microservices.yml exec -T api python -m pytest tests/test_frontend_static.py`, `docker compose -f docker-compose-microservices.yml exec -T api python -m pytest tests/test_route_editor_v2_contract.py`, browser protocol visibility/reviewer-fix smoke tests, and `docker compose -f docker-compose-microservices.yml exec -T api python -m pytest` all passed.
 
 ### 10. Implement Route Editor V2 FFmpeg Mapping
 

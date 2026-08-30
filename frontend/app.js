@@ -48,7 +48,6 @@ async function fetchNodeRole() {
         if (systemNodeRole === "standalone") {
             document.getElementById("hardwareNodeGroup").style.display = "none";
         } else {
-            document.getElementById("hardwareNodeRow").style.gridTemplateColumns = "1fr 1fr";
             document.getElementById("hardwareNodeGroup").parentElement.firstElementChild.style.gridColumn = "auto";
         }
     } catch (e) {
@@ -196,6 +195,7 @@ function matchingInterfaces(role, direction) {
 
 function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
     const select = document.getElementById(selectId);
+    if (!select) return;
     const options = matchingInterfaces(role, direction);
     select.innerHTML = "";
 
@@ -207,6 +207,7 @@ function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
     options.forEach(item => {
         const option = document.createElement("option");
         option.value = item.ip;
+        option.dataset.interfaceId = item.id || "";
         option.textContent = interfaceLabel(item);
         select.appendChild(option);
     });
@@ -214,6 +215,7 @@ function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
     if (selectedIp && !options.some(item => item.ip === selectedIp)) {
         const preserved = document.createElement("option");
         preserved.value = selectedIp;
+        preserved.dataset.interfaceId = "";
         preserved.textContent = `Existing interface (${selectedIp})`;
         select.appendChild(preserved);
     }
@@ -226,75 +228,395 @@ function populateAllInterfaceSelects(config = {}) {
     populateInterfaceSelect("primaryOutputBindIp", "primary", "output", getExplicitOutputBind(config, "primary"));
     populateInterfaceSelect("backupNodeInputBindIp", "backup", "input", getExplicitInputBind(config, "backup"));
     populateInterfaceSelect("backupNodeOutputBindIp", "backup", "output", getExplicitOutputBind(config, "backup"));
+    populateRouteEndpointSelects(config);
 }
 
 function populateBindingFields(config) {
     populateAllInterfaceSelects(config);
 }
 
+function getSelectedInterface(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return { bind_ip: null, interface_id: null };
+    const selected = select.options[select.selectedIndex];
+    return {
+        bind_ip: select.value || null,
+        interface_id: selected?.dataset?.interfaceId || null
+    };
+}
+
+function parseOptionalInt(id) {
+    const value = document.getElementById(id)?.value;
+    if (value === undefined || value === null || value === "") return null;
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function compactObject(value) {
+    const output = {};
+    Object.entries(value).forEach(([key, item]) => {
+        if (item !== null && item !== undefined && item !== "") output[key] = item;
+    });
+    return output;
+}
+
+function buildRouteEndpointFromForm(prefix) {
+    const fieldMap = {
+        source: {
+            interfaceId: "sourceInterface",
+            addressId: "sourceIp",
+            portId: "sourcePort"
+        },
+        destination: {
+            interfaceId: "destinationInterface",
+            addressId: "destinationHost",
+            portId: "destinationPort"
+        },
+        destinationSecondary: {
+            interfaceId: "destinationSecondaryInterface",
+            addressId: "destinationSecondaryHost",
+            portId: "destinationSecondaryPort"
+        }
+    };
+    const fields = fieldMap[prefix];
+    const selectedInterface = getSelectedInterface(fields.interfaceId);
+    return compactObject({
+        interface_id: selectedInterface.interface_id,
+        bind_ip: selectedInterface.bind_ip,
+        address: document.getElementById(fields.addressId).value.trim() || "0.0.0.0",
+        port: parseOptionalInt(fields.portId)
+    });
+}
+
+function hydrateRouteEndpoint(prefix, endpoint = {}, fallback = {}) {
+    const fieldMap = {
+        source: {
+            interfaceId: "sourceInterface",
+            role: "primary",
+            direction: "input",
+            addressId: "sourceIp",
+            portId: "sourcePort"
+        },
+        destination: {
+            interfaceId: "destinationInterface",
+            role: "primary",
+            direction: "output",
+            addressId: "destinationHost",
+            portId: "destinationPort"
+        },
+        destinationSecondary: {
+            interfaceId: "destinationSecondaryInterface",
+            role: "backup",
+            direction: "output",
+            addressId: "destinationSecondaryHost",
+            portId: "destinationSecondaryPort"
+        }
+    };
+    const fields = fieldMap[prefix];
+    const bindIp = endpoint.bind_ip || fallback.bind_ip || "";
+    populateInterfaceSelect(fields.interfaceId, fields.role, fields.direction, bindIp);
+    document.getElementById(fields.addressId).value = endpoint.address || fallback.address || "";
+    document.getElementById(fields.portId).value = endpoint.port || fallback.port || "";
+}
+
+function populateRouteEndpointSelects(config = {}) {
+    const sourceEndpoint = config.source?.primary_endpoint || {};
+    const destination = firstEnabledDestination(config.destinations || []) || {};
+    const destinationEndpoint = destination.primary_endpoint || {};
+    const secondaryEndpoint = destination.path_redundancy?.secondary_endpoint || {};
+    populateInterfaceSelect("sourceInterface", "primary", "input", sourceEndpoint.bind_ip || getExplicitInputBind(config, "primary"));
+    populateInterfaceSelect("destinationInterface", "primary", "output", destinationEndpoint.bind_ip || getExplicitOutputBind(config, "primary"));
+    populateInterfaceSelect("destinationSecondaryInterface", "backup", "output", secondaryEndpoint.bind_ip || getExplicitOutputBind(config, "backup"));
+}
+
+function buildStreamIdConfig(scope) {
+    const mode = document.getElementById(`${scope}StreamIdMode`).value;
+    if (mode === "custom") {
+        return compactObject({
+            mode,
+            custom_value: document.getElementById(`${scope}StreamIdCustomValue`).value.trim()
+        });
+    }
+    return compactObject({
+        mode: "default",
+        host_mode: document.getElementById(`${scope}StreamIdHostMode`).value || "publish",
+        resource_name: document.getElementById(`${scope}StreamIdResourceName`).value.trim(),
+        username: document.getElementById(`${scope}StreamIdUsername`).value.trim()
+    });
+}
+
+function hydrateStreamIdConfig(scope, srtParams = {}, legacyStreamid = "") {
+    const streamId = srtParams.stream_id || (legacyStreamid ? { mode: "custom", custom_value: legacyStreamid } : { mode: "default" });
+    document.getElementById(`${scope}StreamIdMode`).value = streamId.mode || "default";
+    document.getElementById(`${scope}StreamIdHostMode`).value = streamId.host_mode || "publish";
+    document.getElementById(`${scope}StreamIdResourceName`).value = streamId.resource_name || "";
+    document.getElementById(`${scope}StreamIdUsername`).value = streamId.username || "";
+    document.getElementById(`${scope}StreamIdCustomValue`).value = streamId.custom_value || "";
+}
+
+function buildSrtParametersFromForm(scope) {
+    const streamId = buildStreamIdConfig(scope);
+    const params = compactObject({
+        latency_ms: parseOptionalInt(`${scope}LatencyMs`),
+        receive_buffer_bytes: scope === "source" ? parseOptionalInt("sourceReceiveBufferBytes") : null,
+        retransmission_bandwidth_kbps: scope === "destination" ? parseOptionalInt("destinationRetransmissionBandwidthKbps") : null,
+        passphrase: document.getElementById(`${scope}Passphrase`).value.trim(),
+        stream_id: streamId
+    });
+    return Object.keys(params).length ? params : null;
+}
+
+function buildLinkParametersFromForm(scope) {
+    if (scope === "source") {
+        return compactObject({
+            ttl: parseOptionalInt("sourceTtl"),
+            mtu: parseOptionalInt("sourceMtu")
+        });
+    }
+    return compactObject({
+        ttl: parseOptionalInt("destinationTtl"),
+        mtu: parseOptionalInt("destinationMtu"),
+        tos: document.getElementById("destinationTos").value.trim(),
+        max_bitrate_kbps: parseOptionalInt("destinationMaxBitrateKbps")
+    });
+}
+
+function buildSourceConfigFromForm() {
+    const protocol = document.getElementById("sourceProtocol").value;
+    if (protocol === "hls") {
+        return compactObject({
+            protocol,
+            url: document.getElementById("sourceUrl").value.trim(),
+            path: ""
+        });
+    }
+
+    const source = compactObject({
+        protocol,
+        mode: protocol === "srt" || protocol === "rtmp" || protocol === "rist" ? document.getElementById("sourceMode").value : null,
+        type: protocol === "udp" ? document.getElementById("sourceUdpType").value : null,
+        primary_endpoint: buildRouteEndpointFromForm("source"),
+        path: protocol === "rtmp" ? document.getElementById("sourcePath").value.trim() : "",
+        link_parameters: protocol === "udp" ? buildLinkParametersFromForm("source") : null,
+        srt: protocol === "srt" ? buildSrtParametersFromForm("source") : null
+    });
+    return source;
+}
+
+function firstEnabledDestination(destinations = []) {
+    return destinations.find(item => item && item.enabled !== false) || null;
+}
+
+function resetTargetNodeOptions() {
+    document.querySelectorAll("#targetNode option[data-legacy-target='true']").forEach(option => option.remove());
+}
+
+function setTargetNodeForCreate() {
+    resetTargetNodeOptions();
+    document.getElementById("targetNode").value = "primary";
+}
+
+function setTargetNodeForEdit(targetNode) {
+    resetTargetNodeOptions();
+    const select = document.getElementById("targetNode");
+    const supportedTargets = ["primary", "backup", "all"];
+    if (!targetNode || supportedTargets.includes(targetNode)) {
+        select.value = targetNode || "primary";
+        return;
+    }
+
+    const legacyOption = document.createElement("option");
+    legacyOption.value = targetNode;
+    legacyOption.dataset.legacyTarget = "true";
+    legacyOption.textContent = `Existing legacy ${targetNode}`;
+    select.appendChild(legacyOption);
+    select.value = targetNode;
+}
+
+function buildPathRedundancyFromForm() {
+    const enabled = document.getElementById("pathRedundancyEnabled").checked;
+    if (!enabled) return { enabled: false, mode: "none", secondary_endpoint: null };
+    return {
+        enabled: true,
+        mode: "manual",
+        secondary_endpoint: buildRouteEndpointFromForm("destinationSecondary")
+    };
+}
+
+function buildRtmpDestinationUrl(protocol) {
+    const host = document.getElementById("destinationHost").value.trim();
+    const port = document.getElementById("destinationPort").value.trim();
+    if (!host || !port) return "";
+    const path = normalizePath(document.getElementById("destinationPath").value.trim() || "/live");
+    const key = document.getElementById("destinationKey").value.trim();
+    return `${protocol}://${host}:${port}${path}${key ? normalizePath(key) : ""}`;
+}
+
 function buildDestinationUrlFromFields() {
     const builder = document.getElementById("destinationBuilderProtocol").value;
-    if (builder === "raw") return document.getElementById("destinationUrl").value;
+    if (!document.getElementById("normalDestinationEnabled").checked) return "";
+    if (builder === "raw") return document.getElementById("destinationUrl").value.trim();
 
     const host = document.getElementById("destinationHost").value.trim();
     const port = document.getElementById("destinationPort").value.trim();
     if (!host || !port) return document.getElementById("destinationUrl").value;
 
-    if (builder === "rtmp") {
-        const path = normalizePath(document.getElementById("destinationPath").value.trim());
-        const key = document.getElementById("destinationKey").value.trim();
-        return `rtmp://${host}:${port}${path}${key ? normalizePath(key) : ""}`;
+    if (builder === "rtmp" || builder === "rtmps") {
+        return buildRtmpDestinationUrl(builder);
     }
 
     if (builder === "udp") {
         return appendQuery(`udp://${host}:${port}`, {
-            ttl: document.getElementById("destinationTtl").value,
-            pkt_size: document.getElementById("destinationPktSize").value
+            ttl: document.getElementById("destinationTtl").value
         });
     }
 
+    if (builder === "rist") return `rist://${host}:${port}`;
+
     return appendQuery(`srt://${host}:${port}`, {
         mode: document.getElementById("destinationMode").value || "caller",
-        streamid: document.getElementById("destinationStreamid").value.trim(),
+        streamid: document.getElementById("destinationStreamIdMode").value === "custom" ? document.getElementById("destinationStreamIdCustomValue").value.trim() : "",
         passphrase: document.getElementById("destinationPassphrase").value.trim(),
-        pbkeylen: document.getElementById("destinationPbkeylen").value
+        pbkeylen: document.getElementById("pbkeylen").value !== "0" ? document.getElementById("pbkeylen").value : ""
     });
 }
 
-function setDestinationBuilderVisibility() {
+function buildDestinationConfigFromForm() {
+    if (!document.getElementById("normalDestinationEnabled").checked) return [];
     const protocol = document.getElementById("destinationBuilderProtocol").value;
-    const fields = document.getElementById("destinationBuilderFields");
-    fields.style.display = protocol === "raw" ? "none" : "flex";
+    if (protocol === "raw") {
+        return [compactObject({
+            protocol: "raw",
+            url: document.getElementById("destinationUrl").value.trim(),
+            enabled: true
+        })];
+    }
+    const destination = compactObject({
+        protocol,
+        mode: protocol === "srt" ? document.getElementById("destinationMode").value : null,
+        type: protocol === "udp" ? document.getElementById("destinationUdpType").value : null,
+        primary_endpoint: buildRouteEndpointFromForm("destination"),
+        path_redundancy: protocol === "srt" ? buildPathRedundancyFromForm() : null,
+        link_parameters: protocol === "udp" ? buildLinkParametersFromForm("destination") : null,
+        srt: protocol === "srt" ? buildSrtParametersFromForm("destination") : null,
+        url: protocol === "rtmp" || protocol === "rtmps" ? buildRtmpDestinationUrl(protocol) : null,
+        enabled: true
+    });
+    return [destination];
+}
 
+function buildLegacyFieldsFromStructured(source, destinations) {
+    const sourceEndpoint = source.primary_endpoint || {};
+    const sourceSrt = source.srt || {};
+    const sourceStreamId = sourceSrt.stream_id || {};
+    const legacyStreamId = source.protocol === "srt" && sourceStreamId.mode === "custom"
+        ? sourceStreamId.custom_value
+        : null;
+    return {
+        source_protocol: source.protocol,
+        source_mode: source.mode || "listener",
+        source_ip: source.protocol === "hls" ? "0.0.0.0" : (sourceEndpoint.address || "0.0.0.0"),
+        source_port: source.protocol === "hls" ? null : sourceEndpoint.port,
+        source_path: source.path || "",
+        source_url: source.protocol === "hls" ? (source.url || null) : null,
+        destination_url: buildDestinationUrlFromFields(),
+        latency_ms: sourceSrt.latency_ms || null,
+        passphrase: sourceSrt.passphrase || null,
+        streamid: legacyStreamId || null
+    };
+}
+
+function setRouteEditorVisibility() {
+    const sourceProtocol = document.getElementById("sourceProtocol").value;
+    const destinationProtocol = document.getElementById("destinationBuilderProtocol").value;
+    const normalDestinationEnabled = document.getElementById("normalDestinationEnabled").checked;
+    const sourceIsHls = sourceProtocol === "hls";
+
+    document.querySelectorAll(".source-network-field").forEach(el => {
+        el.style.display = sourceIsHls ? "none" : "";
+    });
+    document.querySelectorAll(".source-hls-field").forEach(el => {
+        el.style.display = sourceIsHls ? "flex" : "none";
+    });
+    document.querySelectorAll(".source-srt-field").forEach(el => {
+        el.style.display = sourceProtocol === "srt" ? "block" : "none";
+    });
+    document.querySelectorAll(".source-udp-field").forEach(el => {
+        el.style.display = sourceProtocol === "udp" ? "" : "none";
+    });
+    document.querySelectorAll(".source-rtmp-field").forEach(el => {
+        el.style.display = sourceProtocol === "rtmp" ? "flex" : "none";
+    });
+    document.querySelectorAll(".source-mode-field").forEach(el => {
+        el.style.display = ["srt", "rtmp", "rist"].includes(sourceProtocol) ? "flex" : "none";
+    });
+
+    document.getElementById("sourceIp").required = !sourceIsHls;
+    document.getElementById("sourcePort").required = !sourceIsHls;
+    document.getElementById("sourceUrl").required = sourceIsHls;
+
+    document.getElementById("normalDestinationFields").style.display = normalDestinationEnabled ? "block" : "none";
+    document.querySelectorAll(".destination-raw-field").forEach(el => {
+        el.style.display = normalDestinationEnabled && destinationProtocol === "raw" ? "flex" : "none";
+    });
+    document.querySelectorAll(".destination-endpoint-field").forEach(el => {
+        el.style.display = normalDestinationEnabled && destinationProtocol !== "raw" ? "grid" : "none";
+    });
     document.querySelectorAll(".destination-rtmp-field").forEach(el => {
-        el.style.display = protocol === "rtmp" ? "grid" : "none";
+        el.style.display = normalDestinationEnabled && ["rtmp", "rtmps"].includes(destinationProtocol) ? "" : "none";
     });
     document.querySelectorAll(".destination-srt-field").forEach(el => {
-        el.style.display = protocol === "srt" ? "grid" : "none";
+        el.style.display = normalDestinationEnabled && destinationProtocol === "srt" ? "" : "none";
     });
     document.querySelectorAll(".destination-udp-field").forEach(el => {
-        el.style.display = protocol === "udp" ? "grid" : "none";
+        el.style.display = normalDestinationEnabled && destinationProtocol === "udp" ? "" : "none";
     });
+    document.querySelectorAll(".path-redundancy-field").forEach(el => {
+        el.style.display = normalDestinationEnabled && destinationProtocol === "srt" && document.getElementById("pathRedundancyEnabled").checked ? "" : "none";
+    });
+    document.querySelectorAll(".source-stream-default-field").forEach(el => {
+        el.style.display = document.getElementById("sourceStreamIdMode").value === "default" ? "block" : "none";
+    });
+    document.querySelectorAll(".source-stream-custom-field").forEach(el => {
+        el.style.display = document.getElementById("sourceStreamIdMode").value === "custom" ? "flex" : "none";
+    });
+    document.querySelectorAll(".destination-stream-default-field").forEach(el => {
+        el.style.display = document.getElementById("destinationStreamIdMode").value === "default" ? "block" : "none";
+    });
+    document.querySelectorAll(".destination-stream-custom-field").forEach(el => {
+        el.style.display = document.getElementById("destinationStreamIdMode").value === "custom" ? "flex" : "none";
+    });
+    syncDestinationRequired();
 }
 
-function populateDestinationBuilder(destinationUrl) {
-    document.getElementById("destinationBuilderProtocol").value = "raw";
+function populateDestinationBuilder(destinationUrl = "") {
     document.getElementById("destinationHost").value = "";
     document.getElementById("destinationPort").value = "";
     document.getElementById("destinationPath").value = "";
     document.getElementById("destinationKey").value = "";
     document.getElementById("destinationMode").value = "caller";
-    document.getElementById("destinationStreamid").value = "";
+    document.getElementById("destinationUdpType").value = "unicast";
     document.getElementById("destinationPassphrase").value = "";
-    document.getElementById("destinationPbkeylen").value = "";
+    document.getElementById("destinationLatencyMs").value = "";
+    document.getElementById("destinationRetransmissionBandwidthKbps").value = "";
     document.getElementById("destinationTtl").value = "";
-    document.getElementById("destinationPktSize").value = "";
+    document.getElementById("destinationMtu").value = "";
+    document.getElementById("destinationTos").value = "";
+    document.getElementById("destinationMaxBitrateKbps").value = "";
+    document.getElementById("pathRedundancyEnabled").checked = false;
+    hydrateStreamIdConfig("destination", {});
+    document.getElementById("destinationUrl").value = destinationUrl || "";
+
+    if (!destinationUrl) {
+        setRouteEditorVisibility();
+        return;
+    }
 
     try {
         const url = new URL(destinationUrl);
-        if (url.protocol === "rtmp:") {
+        if (url.protocol === "rtmp:" || url.protocol === "rtmps:") {
             const parts = url.pathname.split("/").filter(Boolean);
-            document.getElementById("destinationBuilderProtocol").value = "rtmp";
+            document.getElementById("destinationBuilderProtocol").value = url.protocol.replace(":", "");
             document.getElementById("destinationHost").value = url.hostname;
             document.getElementById("destinationPort").value = url.port || "1935";
             document.getElementById("destinationPath").value = parts.length > 1 ? `/${parts.slice(0, -1).join("/")}` : url.pathname || "/live";
@@ -304,44 +626,30 @@ function populateDestinationBuilder(destinationUrl) {
             document.getElementById("destinationHost").value = url.hostname;
             document.getElementById("destinationPort").value = url.port;
             document.getElementById("destinationMode").value = url.searchParams.get("mode") || "caller";
-            document.getElementById("destinationStreamid").value = url.searchParams.get("streamid") || "";
             document.getElementById("destinationPassphrase").value = url.searchParams.get("passphrase") || "";
-            document.getElementById("destinationPbkeylen").value = url.searchParams.get("pbkeylen") || "";
+            if (url.searchParams.get("pbkeylen")) document.getElementById("pbkeylen").value = url.searchParams.get("pbkeylen");
+            hydrateStreamIdConfig("destination", {}, url.searchParams.get("streamid") || "");
         } else if (url.protocol === "udp:") {
             document.getElementById("destinationBuilderProtocol").value = "udp";
             document.getElementById("destinationHost").value = url.hostname;
             document.getElementById("destinationPort").value = url.port;
             document.getElementById("destinationTtl").value = url.searchParams.get("ttl") || "";
-            document.getElementById("destinationPktSize").value = url.searchParams.get("pkt_size") || "";
+        } else if (url.protocol === "rist:") {
+            document.getElementById("destinationBuilderProtocol").value = "rist";
+            document.getElementById("destinationHost").value = url.hostname;
+            document.getElementById("destinationPort").value = url.port;
+        } else {
+            document.getElementById("destinationBuilderProtocol").value = "raw";
         }
     } catch {
         document.getElementById("destinationBuilderProtocol").value = "raw";
     }
-    setDestinationBuilderVisibility();
+    setRouteEditorVisibility();
 }
 
 function syncDestinationUrlPreview() {
     const builder = document.getElementById("destinationBuilderProtocol").value;
     if (builder !== "raw") document.getElementById("destinationUrl").value = buildDestinationUrlFromFields();
-}
-
-function setSourceProtocolVisibility() {
-    const protocol = document.getElementById("sourceProtocol").value;
-    const isHls = protocol === "hls";
-
-    document.querySelectorAll(".source-network-field").forEach(el => {
-        el.style.display = isHls ? "none" : "";
-    });
-    document.querySelectorAll(".source-hls-field").forEach(el => {
-        el.style.display = isHls ? "flex" : "none";
-    });
-    document.querySelectorAll(".source-rtmp-field").forEach(el => {
-        el.style.display = protocol === "rtmp" ? "flex" : "none";
-    });
-
-    document.getElementById("sourceIp").required = !isHls;
-    document.getElementById("sourcePort").required = !isHls;
-    document.getElementById("sourceUrl").required = isHls;
 }
 
 function setHlsControlVisibility() {
@@ -351,7 +659,10 @@ function setHlsControlVisibility() {
 
 function syncDestinationRequired() {
     const hlsEnabled = document.getElementById("enableHlsPreview").checked || document.getElementById("enableFullHls").checked;
-    document.getElementById("destinationUrl").required = !hlsEnabled;
+    const normalDestinationEnabled = document.getElementById("normalDestinationEnabled").checked;
+    document.getElementById("destinationUrl").required = normalDestinationEnabled && !hlsEnabled && document.getElementById("destinationBuilderProtocol").value === "raw";
+    document.getElementById("destinationHost").required = normalDestinationEnabled && document.getElementById("destinationBuilderProtocol").value !== "raw";
+    document.getElementById("destinationPort").required = normalDestinationEnabled && document.getElementById("destinationBuilderProtocol").value !== "raw";
 }
 
 function serviceStatusLabel(status) {
@@ -558,6 +869,79 @@ async function swapNode(id) {
     await fetchServices();
 }
 
+function hydrateSourceConfig(config = {}) {
+    const source = config.source || {};
+    const protocol = source.protocol || config.source_protocol || "srt";
+    document.getElementById("sourceProtocol").value = protocol;
+    document.getElementById("sourceMode").value = source.mode || config.source_mode || "listener";
+    document.getElementById("sourceUdpType").value = source.type || "unicast";
+    document.getElementById("sourcePath").value = source.path || config.source_path || "";
+    document.getElementById("sourceUrl").value = source.url || config.source_url || "";
+    hydrateRouteEndpoint("source", source.primary_endpoint || {}, {
+        bind_ip: source.primary_endpoint?.bind_ip || getExplicitInputBind(config, "primary"),
+        address: config.source_ip || "0.0.0.0",
+        port: config.source_port || ""
+    });
+    const linkParameters = source.link_parameters || {};
+    document.getElementById("sourceTtl").value = linkParameters.ttl ?? "";
+    document.getElementById("sourceMtu").value = linkParameters.mtu ?? "";
+    const srtParams = source.srt || {};
+    document.getElementById("sourceLatencyMs").value = srtParams.latency_ms || config.latency_ms || "";
+    document.getElementById("sourceReceiveBufferBytes").value = srtParams.receive_buffer_bytes || "";
+    document.getElementById("sourcePassphrase").value = srtParams.passphrase || config.passphrase || "";
+    hydrateStreamIdConfig("source", srtParams, config.streamid || "");
+}
+
+function hydrateDestinationConfig(config = {}) {
+    const destination = firstEnabledDestination(config.destinations || []);
+    const destinationUrl = config.destination_url || destination?.url || "";
+    const hasNormalDestination = !!(destination || destinationUrl);
+    document.getElementById("normalDestinationEnabled").checked = hasNormalDestination || !hasAnyHlsOutput(config);
+
+    const protocol = destination?.protocol || "";
+    if (protocol) {
+        document.getElementById("destinationBuilderProtocol").value = protocol;
+    } else {
+        populateDestinationBuilder(destinationUrl);
+    }
+
+    const selectedProtocol = document.getElementById("destinationBuilderProtocol").value;
+    if (destination && selectedProtocol !== "raw") {
+        hydrateRouteEndpoint("destination", destination.primary_endpoint || {}, {
+            bind_ip: destination.primary_endpoint?.bind_ip || getExplicitOutputBind(config, "primary"),
+            address: "",
+            port: ""
+        });
+    }
+    if (destination?.url && (selectedProtocol === "rtmp" || selectedProtocol === "rtmps")) {
+        populateDestinationBuilder(destination.url);
+    } else if (selectedProtocol === "raw") {
+        document.getElementById("destinationUrl").value = destination?.url || destinationUrl || "";
+    }
+
+    document.getElementById("destinationMode").value = destination?.mode || "caller";
+    document.getElementById("destinationUdpType").value = destination?.type || "unicast";
+    const linkParameters = destination?.link_parameters || {};
+    document.getElementById("destinationTtl").value = linkParameters.ttl ?? "";
+    document.getElementById("destinationMtu").value = linkParameters.mtu ?? "";
+    document.getElementById("destinationTos").value = linkParameters.tos || "";
+    document.getElementById("destinationMaxBitrateKbps").value = linkParameters.max_bitrate_kbps || "";
+    const srtParams = destination?.srt || {};
+    document.getElementById("destinationLatencyMs").value = srtParams.latency_ms || "";
+    document.getElementById("destinationRetransmissionBandwidthKbps").value = srtParams.retransmission_bandwidth_kbps || "";
+    document.getElementById("destinationPassphrase").value = srtParams.passphrase || "";
+    hydrateStreamIdConfig("destination", srtParams, "");
+
+    const redundancy = destination?.path_redundancy || {};
+    document.getElementById("pathRedundancyEnabled").checked = !!redundancy.enabled;
+    hydrateRouteEndpoint("destinationSecondary", redundancy.secondary_endpoint || {}, {
+        bind_ip: redundancy.secondary_endpoint?.bind_ip || getExplicitOutputBind(config, "backup"),
+        address: "",
+        port: ""
+    });
+    syncDestinationUrlPreview();
+}
+
 function openModal(id) {
     document.getElementById(id).classList.add("active");
 }
@@ -567,21 +951,38 @@ function closeModal(id) {
     document.getElementById("serviceForm").reset();
     document.getElementById("serviceId").value = "";
     document.getElementById("modalTitle").innerText = "Create New Service";
-    document.getElementById("advancedOptions").style.display = "none";
+    document.getElementById("advancedOptions").classList.remove("active");
+    document.getElementById("sourceProtocol").value = "srt";
+    document.getElementById("destinationBuilderProtocol").value = "srt";
+    document.getElementById("normalDestinationEnabled").checked = true;
+    setTargetNodeForCreate();
+    hydrateStreamIdConfig("source", {});
+    hydrateStreamIdConfig("destination", {});
     populateDestinationBuilder("");
     populateBindingFields({});
-    setSourceProtocolVisibility();
+    populateRouteEndpointSelects({});
+    setRouteEditorVisibility();
     setHlsControlVisibility();
-    syncDestinationRequired();
 }
 
-document.getElementById("sourceProtocol").addEventListener("change", setSourceProtocolVisibility);
+[
+    "sourceProtocol",
+    "sourceStreamIdMode",
+    "destinationBuilderProtocol",
+    "destinationMode",
+    "destinationStreamIdMode",
+    "normalDestinationEnabled",
+    "pathRedundancyEnabled",
+    "enableHlsPreview",
+    "enableFullHls"
+].forEach(id => document.getElementById(id).addEventListener("change", setRouteEditorVisibility));
+
 document.getElementById("enableFullHls").addEventListener("change", setHlsControlVisibility);
-document.getElementById("enableHlsPreview").addEventListener("change", syncDestinationRequired);
-document.getElementById("enableFullHls").addEventListener("change", syncDestinationRequired);
 
 document.getElementById("destinationBuilderProtocol").addEventListener("change", () => {
-    setDestinationBuilderVisibility();
+    if (document.getElementById("destinationBuilderProtocol").value !== "raw") {
+        document.getElementById("destinationUrl").value = "";
+    }
     syncDestinationUrlPreview();
 });
 
@@ -591,11 +992,10 @@ document.getElementById("destinationBuilderProtocol").addEventListener("change",
     "destinationPath",
     "destinationKey",
     "destinationMode",
-    "destinationStreamid",
+    "destinationStreamIdCustomValue",
     "destinationPassphrase",
-    "destinationPbkeylen",
+    "pbkeylen",
     "destinationTtl",
-    "destinationPktSize"
 ].forEach(id => document.getElementById(id).addEventListener("input", syncDestinationUrlPreview));
 
 document.getElementById("serviceForm").addEventListener("submit", async (e) => {
@@ -606,10 +1006,11 @@ document.getElementById("serviceForm").addEventListener("submit", async (e) => {
     let keylenParsed = parseInt(document.getElementById("pbkeylen").value, 10);
 
     const existingBindings = isEdit ? (servicesMap[id].config.node_bindings || {}) : {};
-    const sourceProtocol = document.getElementById("sourceProtocol").value;
-    const sourcePortValue = document.getElementById("sourcePort").value;
     const lowResHlsEnabled = document.getElementById("enableHlsPreview").checked;
     const fullHlsEnabled = document.getElementById("enableFullHls").checked;
+    const source = buildSourceConfigFromForm();
+    const destinations = buildDestinationConfigFromForm();
+    const legacyFields = buildLegacyFieldsFromStructured(source, destinations);
     const destinationUrl = buildDestinationUrlFromFields();
     if (!destinationUrl && !lowResHlsEnabled && !fullHlsEnabled) {
         alert("Destination URL is required unless Low-Res or Full HLS output is enabled.");
@@ -619,22 +1020,15 @@ document.getElementById("serviceForm").addEventListener("submit", async (e) => {
     const payload = {
         id: id || "",
         name: document.getElementById("serviceName").value,
-        source_protocol: sourceProtocol,
-        source_mode: document.getElementById("sourceMode").value,
-        source_ip: document.getElementById("sourceIp").value || "0.0.0.0",
-        source_port: sourceProtocol === "hls" ? null : parseInt(sourcePortValue, 10),
-        source_path: document.getElementById("sourcePath").value,
-        source_url: document.getElementById("sourceUrl").value || null,
-        destination_url: destinationUrl,
+        source,
+        destinations,
+        ...legacyFields,
 
         target_node: document.getElementById("targetNode").value,
 
         local_bind_ip: document.getElementById("localBindIp").value || null,
         node_bindings: buildNodeBindingsFromForm(existingBindings),
-        latency_ms: document.getElementById("latencyMs").value ? parseInt(document.getElementById("latencyMs").value, 10) : null,
-        passphrase: document.getElementById("passphrase").value || null,
         pbkeylen: keylenParsed !== 0 ? keylenParsed : null,
-        streamid: document.getElementById("streamid").value || null,
 
         backup_input_ip: document.getElementById("backupInputIp").value || null,
         auto_failover: document.getElementById("autoFailover").checked,
@@ -682,20 +1076,11 @@ function editService(id) {
     document.getElementById("modalTitle").innerText = "Edit Service Properties";
     document.getElementById("serviceId").value = s.config.id;
     document.getElementById("serviceName").value = s.config.name;
-    document.getElementById("sourceProtocol").value = s.config.source_protocol || "srt";
-    document.getElementById("sourceMode").value = s.config.source_mode || "listener";
-    document.getElementById("sourceIp").value = s.config.source_ip || "0.0.0.0";
-    document.getElementById("sourcePort").value = s.config.source_port || "";
-    document.getElementById("sourcePath").value = s.config.source_path || "";
-    document.getElementById("sourceUrl").value = s.config.source_url || "";
-    document.getElementById("destinationUrl").value = s.config.destination_url || "";
 
-    document.getElementById("targetNode").value = ["primary", "backup", "all"].includes(s.config.target_node) ? s.config.target_node : "primary";
+    setTargetNodeForEdit(s.config.target_node);
 
     document.getElementById("localBindIp").value = s.config.local_bind_ip || "";
     populateBindingFields(s.config);
-    document.getElementById("latencyMs").value = s.config.latency_ms || "";
-    document.getElementById("passphrase").value = s.config.passphrase || "";
     document.getElementById("pbkeylen").value = s.config.pbkeylen || "0";
     document.getElementById("streamid").value = s.config.streamid || "";
 
@@ -706,10 +1091,11 @@ function editService(id) {
     document.getElementById("enableHlsPreview").checked = hlsOutputs.low_res.enabled;
     document.getElementById("enableFullHls").checked = hlsOutputs.full_res.enabled;
     document.getElementById("fullHlsBufferHours").value = Math.max(1, Math.ceil((hlsOutputs.full_res.buffer_seconds || 3600) / 3600));
-    populateDestinationBuilder(s.config.destination_url || "");
-    setSourceProtocolVisibility();
+    hydrateSourceConfig(s.config);
+    hydrateDestinationConfig(s.config);
+    populateRouteEndpointSelects(s.config);
+    setRouteEditorVisibility();
     setHlsControlVisibility();
-    syncDestinationRequired();
 
     openModal("createModal");
 }
@@ -732,6 +1118,6 @@ async function stopService(id) {
     await fetchServices();
 }
 
-setSourceProtocolVisibility();
+populateRouteEndpointSelects({});
+setRouteEditorVisibility();
 setHlsControlVisibility();
-syncDestinationRequired();

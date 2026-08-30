@@ -382,7 +382,16 @@ The API also accepts additive structured route fields for the Route Editor V2 co
 | `source` | Optional protocol-aware source object with endpoint, link parameter, SRT parameter, Stream ID, HLS URL, and path redundancy fields. When supplied, the API derives worker-compatible flat fields such as `source_protocol`, `source_ip`, `source_port`, `source_url`, `latency_ms`, `passphrase`, and custom `streamid`. |
 | `destinations` | Optional list of protocol-aware normal destinations. This release supports one enabled normal destination and derives `destination_url` for current workers. Additional generated HLS outputs remain configured through `hls_outputs`, not `destinations`. |
 
-The existing flat fields remain supported for compatibility. This structured contract is the API/backend foundation for Route Editor V2; the full protocol-aware UI and broader FFmpeg structured runtime mapping remain future backlog items.
+The existing flat fields remain supported for compatibility. The browser UI now writes these structured fields while preserving flat worker-compatible fields. Broader FFmpeg structured runtime mapping remains a future backlog item.
+
+The Route Editor V2 UI is protocol-aware:
+
+- Source controls show only the selected protocol's relevant fields for SRT, UDP, RTMP, RIST, or HLS.
+- Destination controls support SRT, UDP, RTMP, RTMPS, RIST, or raw URL compatibility.
+- UDP source and destination controls include unicast/multicast type selection.
+- SRT source and destination controls include listener/caller mode plus default/custom Stream ID state.
+- SRT destination supports manual path redundancy as a secondary endpoint row in the structured config. This stores the path model only; worker failover behavior is still controlled by `target_node`, `ha_mode`, `failover_node`, and Redis leases.
+- `pbkeylen` remains a top-level legacy field. It is not serialized inside `source.srt` or `destinations[].srt`.
 
 ### Network Fields
 

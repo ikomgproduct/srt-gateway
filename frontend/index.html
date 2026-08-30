@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SRT Web Gateway</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=route-editor-v2-ui-reviewer-fixes">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -70,203 +70,318 @@
                 <button class="close-btn" onclick="closeModal('createModal')"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="modal-body">
-                <form id="serviceForm">
+                <form id="serviceForm" class="route-editor-form">
                     <input type="hidden" id="serviceId">
-                    <div class="form-group">
-                        <label>Service Name</label>
-                        <input type="text" id="serviceName" required placeholder="e.g. Main Encoder feed">
-                    </div>
+                    <section class="route-section">
+                        <div class="route-section-title"><i class="fa-solid fa-tag"></i> Basics</div>
+                        <div class="form-group-row" id="hardwareNodeRow">
+                            <div class="form-group">
+                                <label>Service Name</label>
+                                <input type="text" id="serviceName" required placeholder="e.g. Main Encoder feed">
+                            </div>
+                            <div class="form-group" id="hardwareNodeGroup">
+                                <label>Hardware Exec Node</label>
+                                <select id="targetNode" class="form-control-select">
+                                    <option value="primary">Primary Server Only</option>
+                                    <option value="backup">Backup Server Only</option>
+                                    <option value="all">Active-Active (Run on Both)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </section>
 
-                    <!-- Enhanced Source UI -->
-                    <div class="form-group-row">
-                        <div class="form-group">
-                            <label>Source Protocol</label>
-                            <select id="sourceProtocol" class="form-control-select">
-                                <option value="srt">SRT</option>
-                                <option value="rtmp">RTMP</option>
-                                <option value="udp">UDP</option>
-                                <option value="rist">RIST</option>
-                                <option value="hls">HLS</option>
-                            </select>
-                        </div>
-                        <div class="form-group source-network-field source-mode-field">
-                            <label>Source Mode</label>
-                            <select id="sourceMode" class="form-control-select">
-                                <option value="listener">Listener (Server bindings)</option>
-                                <option value="caller">Caller (Pull stream)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group source-hls-field" style="display:none;">
-                        <label>HLS Source URL</label>
-                        <input type="url" id="sourceUrl" placeholder="https://example.com/live/stream.m3u8">
-                    </div>
-
-                    <div class="form-group-row source-network-field">
-                        <div class="form-group">
-                            <label>Main Source IP</label>
-                            <input type="text" id="sourceIp" required placeholder="e.g. 0.0.0.0">
-                        </div>
-                        <div class="form-group">
-                            <label>Source Port</label>
-                            <input type="number" id="sourcePort" required placeholder="9000">
-                        </div>
-                    </div>
-                    
-                    <div class="form-group-row source-network-field">
-                        <div class="form-group">
-                            <label>Backup Source IP (Optional)</label>
-                            <input type="text" id="backupInputIp" placeholder="e.g. 192.168.1.5">
-                        </div>
-                        <div class="form-group" style="display:flex; align-items:flex-end;">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--border); padding: 0 14px; border-radius: 6px; background: var(--bg-dark);">
-                                <input type="checkbox" id="autoFailover">
-                                <span style="font-weight:600; color:var(--accent);">Auto Feed Failover</span>
-                            </label>
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--border); padding: 0 14px; border-radius: 6px; background: var(--bg-dark); margin-left:6px;" title="Agreesively monitors logs for PMT/CC missing errors">
-                                <input type="checkbox" id="strictProbing">
-                                <span style="font-weight:600; color:var(--danger);">Strict Heath Probing</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="form-group-row">
-                        <div class="form-group" style="display:flex; align-items:flex-end;">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--primary); padding: 0 14px; border-radius: 6px; background: rgba(94, 106, 210, 0.1);">
-                                <input type="checkbox" id="enableHlsPreview">
-                                <span style="font-weight:600; color:var(--primary);"><i class="fa-solid fa-satellite-dish"></i> Enable Low-Res HLS Output</span>
-                            </label>
-                        </div>
-                        <div class="form-group" style="display:flex; align-items:flex-end;">
-                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; height: 38px; border: 1px solid var(--accent); padding: 0 14px; border-radius: 6px; background: rgba(32, 201, 151, 0.1);" title="Full HLS generates HD renditions and can require significant CPU/GPU and disk capacity.">
-                                <input type="checkbox" id="enableFullHls">
-                                <span style="font-weight:600; color:var(--accent);"><i class="fa-solid fa-film"></i> Enable Full HLS Output</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="form-group-row" id="fullHlsBufferRow" style="display:none;">
-                        <div class="form-group">
-                            <label>Full HLS Buffer (hours, max 24)</label>
-                            <input type="number" id="fullHlsBufferHours" min="1" max="24" value="1">
-                        </div>
-                        <div class="form-group">
-                            <label>Full HLS Resource Note</label>
-                            <div class="form-note">Generates 720p and 1080p local HLS; plan disk and encoder capacity before enabling many services.</div>
-                        </div>
-                    </div>
-
-                    <div class="form-group source-rtmp-field" id="rtmpPathGroup">
-                        <label>Source Path (RTMP Only)</label>
-                        <input type="text" id="sourcePath" placeholder="/live/stream">
-                    </div>
-
-                    <div class="form-group-row" id="hardwareNodeRow">
-                        <div class="form-group" style="grid-column: 1 / -1;">
-                            <label>Destination URL</label>
-                            <input type="text" id="destinationUrl" placeholder="e.g. rtmp://youtube/live2/KEY">
-                        </div>
-                        <div class="form-group" id="hardwareNodeGroup">
-                            <label>Hardware Exec Node (Cluster HA)</label>
-                            <select id="targetNode" class="form-control-select">
-                                <option value="primary">Primary Server Only</option>
-                                <option value="backup">Backup Server Only</option>
-                                <option value="all">Active-Active (Run on Both)</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Destination Builder</label>
-                        <select id="destinationBuilderProtocol" class="form-control-select">
-                            <option value="raw">Use URL field directly</option>
-                            <option value="rtmp">RTMP destination</option>
-                            <option value="srt">SRT destination</option>
-                            <option value="udp">UDP destination</option>
-                        </select>
-                    </div>
-
-                    <div id="destinationBuilderFields" style="display: none; flex-direction: column; gap: 16px;">
+                    <section class="route-section">
+                        <div class="route-section-title"><i class="fa-solid fa-arrow-right-to-bracket"></i> Source</div>
                         <div class="form-group-row">
                             <div class="form-group">
-                                <label>Destination Host/IP</label>
-                                <input type="text" id="destinationHost" placeholder="e.g. 192.168.10.20">
-                            </div>
-                            <div class="form-group">
-                                <label>Destination Port</label>
-                                <input type="number" id="destinationPort" placeholder="1935">
-                            </div>
-                        </div>
-                        <div class="form-group-row destination-rtmp-field">
-                            <div class="form-group">
-                                <label>RTMP App/Path</label>
-                                <input type="text" id="destinationPath" placeholder="/live">
-                            </div>
-                            <div class="form-group">
-                                <label>RTMP Stream Key</label>
-                                <input type="text" id="destinationKey" placeholder="stream-key">
-                            </div>
-                        </div>
-                        <div class="form-group-row destination-srt-field">
-                            <div class="form-group">
-                                <label>SRT Mode</label>
-                                <select id="destinationMode" class="form-control-select">
-                                    <option value="caller">Caller</option>
-                                    <option value="listener">Listener</option>
+                                <label>Source Protocol</label>
+                                <select id="sourceProtocol" class="form-control-select">
+                                    <option value="srt">SRT</option>
+                                    <option value="udp">UDP</option>
+                                    <option value="rtmp">RTMP</option>
+                                    <option value="rist">RIST</option>
+                                    <option value="hls">HLS</option>
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label>SRT Stream ID</label>
-                                <input type="text" id="destinationStreamid" placeholder="Optional routing ID">
+                            <div class="form-group source-mode-field">
+                                <label>Source Mode</label>
+                                <select id="sourceMode" class="form-control-select">
+                                    <option value="listener">Listener</option>
+                                    <option value="caller">Caller</option>
+                                </select>
                             </div>
                         </div>
-                        <div class="form-group-row destination-udp-field">
+                        <div class="form-group source-hls-field">
+                            <label>HLS Source URL</label>
+                            <input type="url" id="sourceUrl" placeholder="https://example.com/live/stream.m3u8">
+                        </div>
+                        <div class="form-group-row source-network-field">
+                            <div class="form-group source-interface-field">
+                                <label>Input Interface</label>
+                                <select id="sourceInterface" class="form-control-select"></select>
+                            </div>
+                            <div class="form-group source-udp-field">
+                                <label>UDP Type</label>
+                                <select id="sourceUdpType" class="form-control-select">
+                                    <option value="unicast">Unicast</option>
+                                    <option value="multicast">Multicast</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group-row source-network-field">
+                            <div class="form-group">
+                                <label>Source Address</label>
+                                <input type="text" id="sourceIp" required placeholder="e.g. 0.0.0.0">
+                            </div>
+                            <div class="form-group">
+                                <label>Source Port</label>
+                                <input type="number" id="sourcePort" required placeholder="9000">
+                            </div>
+                        </div>
+                        <div class="form-group source-rtmp-field">
+                            <label>Source Path</label>
+                            <input type="text" id="sourcePath" placeholder="/live/stream">
+                        </div>
+                        <div class="form-group-row source-udp-field">
                             <div class="form-group">
                                 <label>UDP TTL</label>
-                                <input type="number" id="destinationTtl" min="1" max="255" placeholder="Optional">
+                                <input type="number" id="sourceTtl" min="0" max="255" placeholder="Optional">
                             </div>
                             <div class="form-group">
-                                <label>UDP Packet Size</label>
-                                <input type="number" id="destinationPktSize" min="188" placeholder="Optional">
+                                <label>UDP MTU</label>
+                                <input type="number" id="sourceMtu" min="1" placeholder="Optional">
                             </div>
                         </div>
-                        <div class="form-group-row destination-srt-field">
-                            <div class="form-group">
-                                <label>SRT Passphrase</label>
-                                <input type="text" id="destinationPassphrase" placeholder="Optional encryption key">
+                        <div class="srt-params source-srt-field">
+                            <div class="form-group-row">
+                                <div class="form-group">
+                                    <label>SRT Latency (ms)</label>
+                                    <input type="number" id="sourceLatencyMs" min="1" placeholder="120">
+                                </div>
+                                <div class="form-group">
+                                    <label>SRT Receive Buffer (bytes)</label>
+                                    <input type="number" id="sourceReceiveBufferBytes" min="1" placeholder="Optional">
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label>SRT Key Size</label>
-                                <select id="destinationPbkeylen" class="form-control-select">
-                                    <option value="">None</option>
-                                    <option value="16">16 Bytes (128-bit)</option>
-                                    <option value="24">24 Bytes (192-bit)</option>
-                                    <option value="32">32 Bytes (256-bit)</option>
-                                </select>
+                            <div class="form-group-row">
+                                <div class="form-group">
+                                    <label>SRT Passphrase</label>
+                                    <input type="text" id="sourcePassphrase" placeholder="Optional encryption key">
+                                </div>
+                                <div class="form-group">
+                                    <label>SRT Stream ID Mode</label>
+                                    <select id="sourceStreamIdMode" class="form-control-select">
+                                        <option value="default">Default builder</option>
+                                        <option value="custom">Custom raw value</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="stream-id-default source-stream-default-field">
+                                <div class="form-group-row">
+                                    <div class="form-group">
+                                        <label>Host Mode</label>
+                                        <select id="sourceStreamIdHostMode" class="form-control-select">
+                                            <option value="publish">Publish</option>
+                                            <option value="request">Request</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Resource Name</label>
+                                        <input type="text" id="sourceStreamIdResourceName" placeholder="resource">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Username</label>
+                                    <input type="text" id="sourceStreamIdUsername" placeholder="Optional">
+                                </div>
+                            </div>
+                            <div class="form-group source-stream-custom-field">
+                                <label>Custom Stream ID</label>
+                                <input type="text" id="sourceStreamIdCustomValue" placeholder="raw-stream-id">
                             </div>
                         </div>
-                    </div>
-                    
-                    <hr style="border-color: var(--border); margin: 10px 0;">
-                    <div style="cursor: pointer; color: var(--primary); font-weight: 500; font-size: 0.9rem;" onclick="document.getElementById('advancedOptions').style.display = document.getElementById('advancedOptions').style.display === 'none' ? 'flex' : 'none'">
-                        <i class="fa-solid fa-sliders"></i> Toggle Advanced Settings (Encryption, NIC Bindings)
-                    </div>
-                    
-                    <div id="advancedOptions" style="display: none; margin-top: 16px; flex-direction: column; gap: 16px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                        
+                    </section>
+
+                    <section class="route-section">
+                        <div class="route-section-title"><i class="fa-solid fa-arrow-right-from-bracket"></i> Destination</div>
+                        <label class="toggle-row">
+                            <input type="checkbox" id="normalDestinationEnabled" checked>
+                            <span>Enable normal destination output</span>
+                        </label>
+                        <div id="normalDestinationFields">
+                            <div class="form-group-row">
+                                <div class="form-group">
+                                    <label>Destination Protocol</label>
+                                    <select id="destinationBuilderProtocol" class="form-control-select">
+                                        <option value="srt">SRT destination</option>
+                                        <option value="udp">UDP destination</option>
+                                        <option value="rtmp">RTMP destination</option>
+                                        <option value="rtmps">RTMPS destination</option>
+                                        <option value="rist">RIST destination</option>
+                                        <option value="raw">Raw URL</option>
+                                    </select>
+                                </div>
+                                <div class="form-group destination-srt-field">
+                                    <label>SRT Mode</label>
+                                    <select id="destinationMode" class="form-control-select">
+                                        <option value="caller">Caller</option>
+                                        <option value="listener">Listener</option>
+                                    </select>
+                                </div>
+                                <div class="form-group destination-udp-field">
+                                    <label>UDP Type</label>
+                                    <select id="destinationUdpType" class="form-control-select">
+                                        <option value="unicast">Unicast</option>
+                                        <option value="multicast">Multicast</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group destination-raw-field">
+                                <label>Destination URL</label>
+                                <input type="text" id="destinationUrl" placeholder="srt://10.70.15.20:9000?mode=caller">
+                            </div>
+                            <div class="form-group-row destination-endpoint-field">
+                                <div class="form-group destination-output-interface-field">
+                                    <label>Output Interface</label>
+                                    <select id="destinationInterface" class="form-control-select"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Destination Address</label>
+                                    <input type="text" id="destinationHost" placeholder="e.g. 192.168.10.20">
+                                </div>
+                            </div>
+                            <div class="form-group-row destination-endpoint-field">
+                                <div class="form-group">
+                                    <label>Destination Port</label>
+                                    <input type="number" id="destinationPort" placeholder="9000">
+                                </div>
+                                <div class="form-group destination-rtmp-field">
+                                    <label>RTMP/RTMPS App Path</label>
+                                    <input type="text" id="destinationPath" placeholder="/live">
+                                </div>
+                            </div>
+                            <div class="form-group destination-rtmp-field">
+                                <label>RTMP/RTMPS Stream Key</label>
+                                <input type="text" id="destinationKey" placeholder="stream-key">
+                            </div>
+                            <div class="form-group-row destination-udp-field">
+                                <div class="form-group">
+                                    <label>UDP TTL</label>
+                                    <input type="number" id="destinationTtl" min="0" max="255" placeholder="Optional">
+                                </div>
+                                <div class="form-group">
+                                    <label>UDP MTU</label>
+                                    <input type="number" id="destinationMtu" min="1" placeholder="Optional">
+                                </div>
+                            </div>
+                            <div class="form-group-row destination-udp-field">
+                                <div class="form-group">
+                                    <label>UDP ToS</label>
+                                    <input type="text" id="destinationTos" placeholder="Optional">
+                                </div>
+                                <div class="form-group">
+                                    <label>Max Bitrate (kbps)</label>
+                                    <input type="number" id="destinationMaxBitrateKbps" min="1" placeholder="Optional">
+                                </div>
+                            </div>
+                            <div class="form-group-row destination-srt-field">
+                                <div class="form-group">
+                                    <label>SRT Latency (ms)</label>
+                                    <input type="number" id="destinationLatencyMs" min="1" placeholder="120">
+                                </div>
+                                <div class="form-group">
+                                    <label>Retransmission Bandwidth (kbps)</label>
+                                    <input type="number" id="destinationRetransmissionBandwidthKbps" min="1" placeholder="Optional">
+                                </div>
+                            </div>
+                            <div class="form-group-row destination-srt-field">
+                                <div class="form-group">
+                                    <label>SRT Passphrase</label>
+                                    <input type="text" id="destinationPassphrase" placeholder="Optional encryption key">
+                                </div>
+                                <div class="form-group">
+                                    <label>Destination Stream ID Mode</label>
+                                    <select id="destinationStreamIdMode" class="form-control-select">
+                                        <option value="default">Default builder</option>
+                                        <option value="custom">Custom raw value</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="stream-id-default destination-stream-default-field">
+                                <div class="form-group-row">
+                                    <div class="form-group">
+                                        <label>Host Mode</label>
+                                        <select id="destinationStreamIdHostMode" class="form-control-select">
+                                            <option value="publish">Publish</option>
+                                            <option value="request">Request</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Resource Name</label>
+                                        <input type="text" id="destinationStreamIdResourceName" placeholder="resource">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Username</label>
+                                    <input type="text" id="destinationStreamIdUsername" placeholder="Optional">
+                                </div>
+                            </div>
+                            <div class="form-group destination-stream-custom-field">
+                                <label>Custom Destination Stream ID</label>
+                                <input type="text" id="destinationStreamIdCustomValue" placeholder="raw-stream-id">
+                            </div>
+                            <div class="destination-srt-field path-redundancy-panel">
+                                <label class="toggle-row">
+                                    <input type="checkbox" id="pathRedundancyEnabled">
+                                    <span>Enable manual path redundancy</span>
+                                </label>
+                                <div class="form-group-row path-redundancy-field">
+                                    <div class="form-group">
+                                        <label>Secondary Output Interface</label>
+                                        <select id="destinationSecondaryInterface" class="form-control-select"></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Secondary Address</label>
+                                        <input type="text" id="destinationSecondaryHost" placeholder="e.g. 192.168.20.20">
+                                    </div>
+                                </div>
+                                <div class="form-group path-redundancy-field">
+                                    <label>Secondary Port</label>
+                                    <input type="number" id="destinationSecondaryPort" placeholder="9001">
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="route-section">
+                        <div class="route-section-title"><i class="fa-solid fa-film"></i> HLS Output</div>
+                        <div class="form-group-row">
+                            <label class="toggle-row">
+                                <input type="checkbox" id="enableHlsPreview">
+                                <span>Enable Low-Res HLS Output</span>
+                            </label>
+                            <label class="toggle-row" title="Full HLS generates HD renditions and can require significant CPU/GPU and disk capacity.">
+                                <input type="checkbox" id="enableFullHls">
+                                <span>Enable Full HLS Output</span>
+                            </label>
+                        </div>
+                        <div class="form-group-row" id="fullHlsBufferRow">
+                            <div class="form-group">
+                                <label>Full HLS Buffer (hours, max 24)</label>
+                                <input type="number" id="fullHlsBufferHours" min="1" max="24" value="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Full HLS Resource Note</label>
+                                <div class="form-note">Generates 720p and 1080p local HLS; plan disk and encoder capacity before enabling many services.</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="route-section">
+                        <div class="route-section-title"><i class="fa-solid fa-network-wired"></i> Worker Target And Bindings</div>
                         <input type="hidden" id="localBindIp">
-
-                        <div class="form-group">
-                            <label>SRT Latency (ms)</label>
-                            <input type="number" id="latencyMs" placeholder="e.g. 120">
-                        </div>
-
+                        <input type="hidden" id="backupInputIp">
                         <div class="binding-panel">
-                            <div class="binding-panel-title">
-                                <i class="fa-solid fa-network-wired"></i>
-                                Interface Bindings
-                            </div>
                             <div class="form-group-row">
                                 <div class="form-group">
                                     <label>Primary Input Interface</label>
@@ -288,31 +403,40 @@
                                 </div>
                             </div>
                         </div>
-
                         <div class="form-group-row">
-                            <div class="form-group">
-                                <label>SRT Passphrase (Encryption)</label>
-                                <input type="text" id="passphrase" placeholder="Secret Key">
-                            </div>
-                            <div class="form-group">
-                                <label>SRT Key Size</label>
-                                <select id="pbkeylen" class="form-control-select">
-                                    <option value="0">None</option>
-                                    <option value="16">16 Bytes (128-bit)</option>
-                                    <option value="24">24 Bytes (192-bit)</option>
-                                    <option value="32">32 Bytes (256-bit)</option>
-                                </select>
+                            <label class="toggle-row">
+                                <input type="checkbox" id="autoFailover">
+                                <span>Auto Feed Failover</span>
+                            </label>
+                            <label class="toggle-row" title="Aggressively monitors logs for PMT/CC missing errors">
+                                <input type="checkbox" id="strictProbing">
+                                <span>Strict Health Probing</span>
+                            </label>
+                        </div>
+                    </section>
+
+                    <section class="route-section">
+                        <button type="button" class="advanced-toggle" onclick="document.getElementById('advancedOptions').classList.toggle('active')">
+                            <i class="fa-solid fa-sliders"></i> Advanced Compatibility
+                        </button>
+                        <div id="advancedOptions" class="advanced-options">
+                            <div class="form-group-row">
+                                <div class="form-group">
+                                    <label>Legacy SRT Key Size</label>
+                                    <select id="pbkeylen" class="form-control-select">
+                                        <option value="0">None</option>
+                                        <option value="16">16 Bytes (128-bit)</option>
+                                        <option value="24">24 Bytes (192-bit)</option>
+                                        <option value="32">32 Bytes (256-bit)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Legacy Stream ID</label>
+                                    <input type="text" id="streamid" placeholder="Filled from custom SRT Stream ID">
+                                </div>
                             </div>
                         </div>
-
-                        <div class="form-group">
-                            <label>SRT Stream ID</label>
-                            <input type="text" id="streamid" placeholder="Routing ID">
-                        </div>
-
-                        <!-- Removed Caller Whitelists array -->
-
-                    </div>
+                    </section>
 
                     <div class="form-actions" style="margin-top: 16px;">
                         <button type="button" class="btn-secondary" onclick="closeModal('createModal')">Cancel</button>
@@ -323,7 +447,7 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=route-editor-v2-ui-reviewer-fixes"></script>
     <style>
         .form-control-select {
             background: var(--bg-dark);
