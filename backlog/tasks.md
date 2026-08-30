@@ -113,7 +113,7 @@ Implementation notes:
 
 ### 9. Implement Route Editor V2 UI
 
-Status: Future
+Status: Architect Handoff Ready
 
 Goal:
 
@@ -134,6 +134,12 @@ Acceptance:
 - Existing services still open correctly in edit mode.
 - Hidden fields do not submit stale protocol data.
 - Form remains usable on desktop and mobile.
+
+Implementation notes:
+
+- Architect handoff is captured in `docs/route-editor-v2-ui-architect-handoff.md`.
+- Keep this item frontend-focused; backend FFmpeg structured mapping remains backlog item 10.
+- The UI should serialize structured `source` and `destinations` while preserving flat compatibility fields for current workers.
 
 ### 10. Implement Route Editor V2 FFmpeg Mapping
 
