@@ -42,16 +42,16 @@ Operators must be able to:
 
 Sources:
 
-- SRT
-- UDP
+- SRT, using `Listener` and `Caller` modes. `Rendezvous` is deferred.
+- UDP, with `Unicast` and `Multicast` type selection.
 - RTMP
 - RIST
 - HLS
 
 Destinations:
 
-- SRT
-- UDP
+- SRT, using `Listener` and `Caller` modes. `Rendezvous` is deferred.
+- UDP, with unicast/multicast-aware addressing where applicable.
 - RTMP/RTMPS
 - RIST
 - Raw URL for supported prefixes
@@ -79,6 +79,25 @@ HLS output:
 - Binding UI uses dropdowns populated from installed/configured hardware inventory, not free text.
 - Visible production binding is primary/backup only; single-worker compatibility remains backend/lab behavior.
 
+## Route Editor V2 Requirements
+
+Engineering feedback captured in `docs/RE_ SRT GW for testing - Adir Hadad - Outlook.pdf` adds the following product requirements for the next configuration slice:
+The detailed product scope map is maintained in `docs/route-editor-v2-product-scope-map.md`.
+
+- The create/edit experience should behave like a route editor with clear Source and Destination sections.
+- The form should dynamically reveal fields based on protocol, protocol mode, and redundancy mode.
+- Network/link parameters should be visually and conceptually separate from protocol parameters.
+- Route basics should include route name, source, destination, start-on-create behavior, and destination start-on-route-start behavior where applicable.
+- Source UDP should ask for UDP type, address, port, and relevant interface binding.
+- Source SRT should ask for SRT mode, address/port semantics appropriate to listener or caller, latency, receive buffer, passphrase, Stream ID, and error correction where supported.
+- Destination UDP should ask for interface, address, port, FEC, bitrate, traffic shaping, MTU, TTL, and ToS where supported.
+- Destination SRT should ask for SRT mode, path redundancy mode, connection/caller limits when listener, interface/address/port rows, link parameters, latency, retransmission bandwidth, encryption, passphrase, authentication, RTP header, Stream ID, and error correction where supported.
+- Path redundancy should add a secondary network path rather than overloading worker selection.
+- Stream ID should support `default` builder mode and `custom` raw mode. Default mode should include host/mode, resource name, and username-style fields if confirmed by architecture.
+- Destination Stream ID configuration should reuse the same product behavior as input Stream ID configuration.
+- `TS over RTP` appears in the engineering reference UI but is not part of the current implemented product; Architect should explicitly add it to future-compatible schema or defer it.
+- Future NIC IP configuration through Linux Netplan should be a separate Network administration feature with backup, validation, rollback, and permission controls.
+
 ## Operational Guardrails
 
 - Full HLS remains capped at 24 hours of buffer.
@@ -91,6 +110,8 @@ HLS output:
 
 - Smart HLS passthrough/cache.
 - Automatic failback.
+- SRT `Rendezvous` mode.
+- Write-capable Linux Netplan/NIC management inside Route Editor V2.
 - Full authentication/authorization model.
 - Redis/Postgres HA design beyond deployment guidance.
 - Removing backend compatibility for `worker_1`.

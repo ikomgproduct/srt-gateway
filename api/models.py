@@ -13,6 +13,8 @@ class ServiceModel(Base):
     source_path = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
     destination_url = Column(String, default="")
+    source = Column(JSON, nullable=True)
+    destinations = Column(JSON, nullable=True)
     
     local_bind_ip = Column(String, nullable=True)
     node_bindings = Column(JSON, nullable=True)

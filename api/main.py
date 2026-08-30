@@ -11,6 +11,7 @@ import asyncio
 import redis.asyncio as redis
 from api.database import engine, Base, get_db, AsyncSessionLocal
 from api.models import ServiceModel
+from api.route_normalizer import normalize_service_payload
 from api.schemas import ServiceConfigRequest
 
 
@@ -117,6 +118,8 @@ async def ensure_schema_columns():
             await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS node_bindings JSONB"))
             await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS source_url VARCHAR"))
             await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS hls_outputs JSONB"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS source JSONB"))
+            await conn.execute(text("ALTER TABLE services ADD COLUMN IF NOT EXISTS destinations JSONB"))
 
 def service_to_dict(service: ServiceModel) -> dict:
     data = service.__dict__.copy()
@@ -235,7 +238,10 @@ async def get_interfaces():
 @app.post("/api/services")
 async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
     import uuid
-    data = config.model_dump()
+    try:
+        data = normalize_service_payload(config.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not data.get("id"):
         data["id"] = str(uuid.uuid4())
     await enforce_full_hls_service_limit(db, data)
@@ -252,7 +258,10 @@ async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depend
 
 @app.put("/api/services/{service_id}")
 async def update_service(service_id: str, config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
-    data = config.model_dump()
+    try:
+        data = normalize_service_payload(config.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     data["id"] = service_id
     await enforce_full_hls_service_limit(db, data, exclude_id=service_id)
     await db.merge(ServiceModel(**data))

@@ -373,6 +373,17 @@ Example active/passive SRT listener service:
 | `destination_url` | Output URL. Must start with `rtmp://`, `rtmps://`, `srt://`, `udp://`, or `rist://`. May be empty when low-res or full HLS output is enabled. |
 | `enabled` | Whether the service should run. |
 
+### Route Editor V2 Structured Fields
+
+The API also accepts additive structured route fields for the Route Editor V2 contract:
+
+| Field | Description |
+| --- | --- |
+| `source` | Optional protocol-aware source object with endpoint, link parameter, SRT parameter, Stream ID, HLS URL, and path redundancy fields. When supplied, the API derives worker-compatible flat fields such as `source_protocol`, `source_ip`, `source_port`, `source_url`, `latency_ms`, `passphrase`, and custom `streamid`. |
+| `destinations` | Optional list of protocol-aware normal destinations. This release supports one enabled normal destination and derives `destination_url` for current workers. Additional generated HLS outputs remain configured through `hls_outputs`, not `destinations`. |
+
+The existing flat fields remain supported for compatibility. This structured contract is the API/backend foundation for Route Editor V2; the full protocol-aware UI and broader FFmpeg structured runtime mapping remain future backlog items.
+
 ### Network Fields
 
 | Field | Description |

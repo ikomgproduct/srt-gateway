@@ -1,6 +1,186 @@
 # SRT Gateway Backlog
 
-## Current Priority: Production Compose Cleanup Before QA
+## Current Priority: Route Editor V2 Product And Architecture Planning
+
+### 6. Capture Engineering Feedback For Route Editor V2
+
+Status: Done
+
+Goal:
+
+- Convert engineering feedback from `docs/RE_ SRT GW for testing - Adir Hadad - Outlook.pdf` into durable product and architecture context for future implementation.
+
+Requirements:
+
+- Treat the route editor as a protocol-aware Source/Destination workflow.
+- Defer SRT `Rendezvous`.
+- Support SRT `Listener` and `Caller` behavior.
+- Support UDP `Unicast` and `Multicast` behavior.
+- Separate network/link parameters from protocol-specific parameters.
+- Model path redundancy as an explicit secondary interface/address/port row.
+- Add SRT Stream ID behavior with `default` builder mode and `custom` raw mode.
+- Reuse Stream ID behavior for SRT input and SRT destination.
+- Keep Linux Netplan write management out of this slice; track it as a separate Network administration feature.
+
+Acceptance:
+
+- Product brief records Route Editor V2 requirements.
+- Architecture doc records the structured contract direction and compatibility expectation.
+- Agent context records the key decisions for future agents.
+- Backlog identifies the next architecture task.
+
+Implementation notes:
+
+- Product decision: SRT `Rendezvous` is deferred.
+- Product decision: Netplan write operations are future/high-risk and require dedicated safety design.
+- Current PDF should remain in `docs/` or its requirements should be copied into docs before sharing work with other machines.
+
+### 7. Architect Route Editor V2 Technical Plan
+
+Status: Done
+
+Goal:
+
+- Produce the concrete technical plan for protocol-aware route creation/editing and the matching API/FFmpeg contract.
+
+Requirements:
+
+- Define structured source and destination schema additions.
+- Define compatibility behavior for existing flat fields.
+- Define FFmpeg mapping for UDP input/output, SRT listener/caller input/output, RTMP, RIST, HLS source, and generated HLS outputs.
+- Define UI field visibility rules by protocol and mode.
+- Define path redundancy behavior separately from worker primary/backup targeting.
+- Define SRT Stream ID builder fields and serialization.
+- Define tests for schema validation, UI serialization, FFmpeg command generation, worker execution, and compatibility.
+
+Acceptance:
+
+- Architecture doc names files likely affected and migration strategy.
+- Architecture doc defines which fields are stored as structured config and which legacy fields are derived or preserved.
+- Architecture doc states out-of-scope items: SRT `Rendezvous`, Netplan write management, automatic failback.
+- Dev Lead can review the plan and prepare an implementer handoff without rereading the PDF.
+
+Implementation notes:
+
+- Additive migration is required. Do not remove or break existing flat payloads.
+- New structured models should be normalized into one internal route shape before FFmpeg command construction.
+- Frontend should serialize structured config and derived compatibility fields during the transition.
+- `node_bindings` remains worker-role binding; path redundancy gets its own endpoint model.
+- Product scope map for Architect follow-up: `docs/route-editor-v2-product-scope-map.md`.
+- Dev Lead gaps resolved in `docs/route-editor-v2-implementer-handoff.md`: `destinations` default factory, multi-destination behavior, Stream ID derivation template, and normalization helper location.
+- Dev Lead handover prepared in `docs/route-editor-v2-dev-lead-handover.md`.
+- Dev Lead approved implementation scope and prepared implementer instructions in `docs/route-editor-v2-dev-lead-implementer-instructions.md`.
+
+### 8. Implement Route Editor V2 Structured Contract
+
+Status: QA Passed - Ready For Commit
+
+Goal:
+
+- Add the API and backend foundation for protocol-aware source/destination configuration.
+
+Requirements:
+
+- Add reusable schema models for endpoints, link parameters, SRT parameters, Stream ID config, source config, and destination config.
+- Accept both legacy flat payloads and structured Route Editor V2 payloads.
+- Derive compatibility fields from structured config when needed.
+- Keep current Redis/Postgres desired config flow intact.
+- Keep existing worker leasing and target-node behavior intact.
+
+Acceptance:
+
+- Existing flat service payload tests continue passing.
+- New structured SRT listener/caller and UDP unicast/multicast payloads validate.
+- Structured payloads produce expected legacy compatibility fields or normalized runtime config.
+- Invalid combinations are rejected clearly, including missing ports for non-HLS network sources.
+
+Implementation notes:
+
+- Use `docs/route-editor-v2-implementer-handoff.md` as the implementer handoff.
+- Use `docs/route-editor-v2-dev-lead-implementer-instructions.md` as the Dev Lead execution checklist.
+- Keep this slice backend/API-focused; defer full UI and FFmpeg expansion to items 9 and 10.
+- `TS over RTP` is product-captured but deferred from this implementation slice.
+- Persist structured `source` and `destinations` as JSON columns so the contract can round-trip in API responses.
+- Implemented structured schemas in `api/schemas.py`.
+- Added pure normalization helpers in `api/route_normalizer.py`.
+- Added `source` and `destinations` JSON columns in `api/models.py`.
+- Added PostgreSQL startup column bootstrap for `source` and `destinations` in `api/main.py`.
+- Create/update API paths normalize payloads before persistence and Redis sync.
+- Dev Lead review fixes added: enabled structured destinations now require a usable target, and enabled path redundancy now requires manual mode plus a secondary endpoint with a port.
+- Added `tests/test_route_editor_v2_contract.py`.
+- QA added the Dev Lead suggested path-redundancy mode regression test.
+- Verification: rebuilt API image, installed `requirements-test.txt` in the running API container, and ran `docker compose -f docker-compose-microservices.yml exec -T api python -m pytest`; result `73 passed`.
+
+### 9. Implement Route Editor V2 UI
+
+Status: Future
+
+Goal:
+
+- Replace the current flat create/edit form with protocol-aware Source and Destination sections.
+
+Requirements:
+
+- Show only fields relevant to selected protocol and mode.
+- Add UDP unicast/multicast controls.
+- Add SRT listener/caller controls.
+- Add default/custom Stream ID builder.
+- Add explicit path redundancy secondary endpoint rows.
+- Preserve edit hydration for existing legacy services.
+
+Acceptance:
+
+- Operators can create and edit UDP and SRT routes without touching raw URL fields for normal cases.
+- Existing services still open correctly in edit mode.
+- Hidden fields do not submit stale protocol data.
+- Form remains usable on desktop and mobile.
+
+### 10. Implement Route Editor V2 FFmpeg Mapping
+
+Status: Future
+
+Goal:
+
+- Build FFmpeg input/output URLs from the normalized structured route contract.
+
+Requirements:
+
+- Map SRT listener/caller input and output binding behavior.
+- Map UDP input/output binding behavior and multicast/unicast params.
+- Preserve RTMP/RTMPS output behavior with `-f flv`.
+- Preserve HLS source and generated HLS output behavior.
+- Keep RIST behavior compatible until richer RIST requirements are confirmed.
+
+Acceptance:
+
+- Builder tests cover SRT listener/caller input and output.
+- Builder tests cover UDP unicast/multicast input and output.
+- Existing RTMP, HLS, and legacy binding tests continue passing.
+- Worker tests confirm structured configs start only on eligible worker roles.
+
+### 11. Design Network Administration Feature
+
+Status: Future
+
+Goal:
+
+- Define a safe product and technical design for viewing and managing server NIC/IP settings separately from Route Editor V2.
+
+Requirements:
+
+- Show installed NICs and current IP configuration.
+- Define whether and how operators can edit IP, gateway, DNS, and route settings.
+- Persist approved changes through Linux Netplan.
+- Protect management access so operators cannot easily lock themselves out.
+- Include backup, validation, rollback, and explicit operator confirmation.
+
+Acceptance:
+
+- Product Lead defines user workflow and permissions.
+- Architect defines Netplan interaction, safety checks, rollback behavior, and deployment constraints.
+- Implementer receives a separate scoped task; this must not be bundled into Route Editor V2.
+
+## Previous Priority: Production Compose Cleanup Before QA
 
 ### 0. Make Production Compose Canonical
 

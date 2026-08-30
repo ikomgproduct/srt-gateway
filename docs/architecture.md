@@ -66,6 +66,163 @@ Important fields:
 - `node_bindings`: per-role input/output bind IPs.
 - `enable_hls_preview`: compatibility flag for low-res HLS output.
 - `hls_outputs`: structured low/full HLS output profiles.
+- `source`: optional Route Editor V2 structured source object.
+- `destinations`: optional Route Editor V2 structured destination list.
+
+## Route Editor V2 Contract Direction
+
+Engineering feedback in `docs/RE_ SRT GW for testing - Adir Hadad - Outlook.pdf` should drive a future protocol-aware route contract. The current flat compatibility fields should remain supported during migration, but new UI/API work should move toward structured source and destination configuration.
+
+Architectural targets:
+
+- Keep SRT `Rendezvous` out of scope for now; support SRT `Listener` and `Caller`.
+- Model source and destination as protocol-specific objects rather than only a single `destination_url`.
+- Keep legacy flat fields compatible for existing services and lab use.
+- Separate network/link parameters from protocol parameters.
+- Represent interface/address/port as path endpoints that can be reused by UDP, SRT, and future protocols.
+- Represent path redundancy explicitly as an optional secondary endpoint row.
+- Represent SRT Stream ID as a structured object with `default` and `custom` modes.
+- Reuse the same Stream ID object for SRT input and SRT destination.
+- Keep worker role targeting separate from network path redundancy; primary/backup worker ownership and primary/backup network paths are related but not the same contract.
+
+Possible future shape:
+
+```json
+{
+  "source": {
+    "protocol": "srt",
+    "mode": "listener",
+    "primary_endpoint": {
+      "interface_id": "primary-video-main",
+      "bind_ip": "10.70.15.3",
+      "address": "0.0.0.0",
+      "port": 9000
+    },
+    "path_redundancy": {
+      "enabled": false,
+      "mode": "none",
+      "secondary_endpoint": null
+    },
+    "srt": {
+      "latency_ms": 125,
+      "receive_buffer_bytes": 10240,
+      "passphrase": "",
+      "error_correction": "arq",
+      "stream_id": {
+        "mode": "default",
+        "resource_name": "resource",
+        "username": ""
+      }
+    }
+  },
+  "destinations": [
+    {
+      "protocol": "udp",
+      "type": "unicast",
+      "primary_endpoint": {
+        "interface_id": "primary-video-main",
+        "bind_ip": "10.70.15.3",
+        "address": "239.10.10.10",
+        "port": 5000
+      }
+    }
+  ]
+}
+```
+
+This shape is implemented as an additive API/backend contract for the first Route Editor V2 slice. UI rebuild and broader FFmpeg/runtime mapping remain future work.
+
+### Route Editor V2 Technical Plan
+
+Current shape:
+
+- `ServiceConfigRequest` in `api/schemas.py` preserves flat fields and also accepts structured `source` and `destinations`.
+- HLS output and node bindings are already structured.
+- `backend/ffmpeg_builder.py` builds input URLs from flat source fields and emits a single normal destination URL plus preview/HLS outputs.
+- `frontend/app.js` serializes a single service form into the flat API contract, with a lightweight destination URL builder.
+
+Proposed change:
+
+- Structured route objects were added to the API contract without removing existing flat fields.
+- Existing services remain valid and Redis/Postgres configs keep worker-compatible flat fields.
+- `api/route_normalizer.py` normalizes flat and structured payloads at the API boundary before persistence and Redis sync.
+- Move the frontend toward protocol-specific form state, then serialize both structured config and legacy compatibility fields during the transition.
+
+Files likely affected:
+
+- `api/schemas.py`: add structured Pydantic models and compatibility validation.
+- `api/main.py`: normalize create/edit payloads and preserve old response behavior.
+- `api/route_normalizer.py`: hold pure structured-to-flat and flat-to-normalized conversion helpers.
+- `api/models.py`: confirm JSON config persistence can hold the structured objects without migration; add DB migration only if columns are added.
+- `backend/models.py`: mirror new runtime config models or accept structured dictionaries safely.
+- `backend/ffmpeg_builder.py`: build input and output URLs from normalized endpoints/protocol params.
+- `worker/worker.py`: ensure workers reconcile structured configs and lease ownership exactly as today.
+- `frontend/index.html`: add protocol-aware source/destination sections and Stream ID controls.
+- `frontend/app.js`: add field visibility, structured serialization, legacy derivation, and edit hydration.
+- `frontend/style.css`: keep Route Editor V2 readable with wider grouped sections.
+- `tests/`: add schema, builder, worker compatibility, and frontend static/serialization coverage.
+
+Data and interfaces:
+
+- `RouteEndpoint`: `interface_id`, `bind_ip`, `address`, `port`.
+- `PathRedundancy`: `enabled`, `mode`, `secondary_endpoint`.
+- `LinkParameters`: `mtu`, `ttl`, `tos`, `fec`, `max_bitrate_kbps`, `traffic_shaping`.
+- `SrtParameters`: `latency_ms`, `receive_buffer_bytes`, `retransmission_bandwidth_kbps`, `encryption`, `passphrase`, `authentication`, `rtp_header`, `error_correction`, `stream_id`.
+- `StreamIdConfig`: `mode: default|custom`, `host_mode`, `resource_name`, `username`, `custom_value`.
+- `SourceConfig`: protocol-specific object for UDP, SRT, RTMP, RIST, or HLS.
+- `DestinationConfig`: list-ready protocol-specific object for UDP, SRT, RTMP/RTMPS, RIST, or generated HLS-adjacent outputs. The list is future-compatible; current runtime should reject more than one enabled normal destination until multi-output behavior is implemented.
+
+Compatibility behavior:
+
+- Accept legacy flat payloads exactly as today.
+- Accept new structured payloads and derive legacy flat fields for older worker/build paths until the worker is fully normalized.
+- Return both structured fields and flat fields during the transition so the current UI, API clients, and tests remain stable.
+- Keep `local_bind_ip`, `backup_input_ip`, and `worker_1` accepted for lab/legacy use, but do not expose them as the production UI target.
+- Keep `node_bindings.primary` and `node_bindings.backup` as worker-role binding; do not overload them with path redundancy.
+- For custom Stream ID mode, derive legacy `streamid` from `custom_value`.
+- For default Stream ID mode, persist the structured fields but do not derive a legacy `streamid` until the exact template is confirmed.
+- `TS over RTP` remains product-captured but deferred from runnable service API acceptance in the first structured-contract slice.
+
+Current implementation notes:
+
+- `source` and `destinations` are persisted as JSON columns.
+- PostgreSQL startup bootstrap adds `source JSONB` and `destinations JSONB` if missing.
+- More than one enabled normal destination is rejected until multi-output runtime behavior is implemented.
+- Enabled structured destinations must include a usable URL or primary endpoint; empty `raw` destinations are rejected instead of producing an empty legacy `destination_url`.
+- Enabled path redundancy requires `mode: manual` and a secondary endpoint with a port; it is persisted for the contract but does not change worker targeting yet.
+- Structured HLS source derives `source_protocol=hls`, `source_url`, and `source_port=None`.
+- Structured SRT/UDP source and destination payloads derive flat compatibility fields.
+- Existing flat payloads are normalized into structured objects for API response and Redis desired config.
+
+FFmpeg mapping:
+
+- SRT listener input: listener host comes from selected input bind IP; `mode=listener`.
+- SRT caller input: remote address/port come from endpoint address/port; selected input bind IP becomes `localaddr`.
+- SRT destination listener: output bind IP/listener endpoint becomes listener host; `mode=listener`; listener-specific limits should only be applied when supported by FFmpeg/SRT URL params.
+- SRT destination caller: remote address/port come from destination endpoint; output bind IP becomes `localaddr`.
+- UDP input: address/port come from source endpoint; selected input bind IP becomes `localaddr`; multicast-specific options should be explicit and tested.
+- UDP destination: address/port come from destination endpoint; output bind IP becomes `localaddr`; link parameters such as TTL and packet size map to URL params where FFmpeg supports them.
+- RTMP/RTMPS destination: continue using `-f flv`; interface binding is not applied unless a future supported mechanism is proven.
+- RIST: keep current behavior first; add richer fields only after confirming FFmpeg option mapping.
+- HLS source and generated HLS output keep the current HLS architecture and guardrails.
+
+Incremental implementation order:
+
+1. Add schema models and normalization helpers with tests; no UI behavior change.
+2. Add backend FFmpeg builder support for normalized source/destination while preserving flat behavior.
+3. Add frontend Route Editor V2 sections for UDP and SRT source/destination.
+4. Add Stream ID builder and edit hydration.
+5. Add path redundancy UI/API behavior.
+6. Add regression tests and QA scenarios using sample FFmpeg sources.
+7. Update README/UI guide after behavior is implemented and reviewed.
+
+Out of scope for Route Editor V2:
+
+- SRT `Rendezvous`.
+- Write-capable Linux Netplan/NIC configuration.
+- Automatic failback.
+- Redis/Postgres HA redesign.
+- Removing legacy flat API compatibility.
 
 ## Binding Model
 
@@ -174,7 +331,7 @@ Important coverage areas:
 - Worker routing and active/passive targeting.
 - Legacy `StreamManager` node-role propagation into FFmpeg command building.
 
-Last verified result after rebuild: `56 passed` with no pytest warning summary.
+Last verified result after API image rebuild and installing `requirements-test.txt` in the running API container: `73 passed` with no pytest warning summary.
 
 Latest production compose validation rendered successfully for single-server, control-plane, primary-worker, and backup-worker env examples.
 
