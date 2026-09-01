@@ -8,8 +8,73 @@ async def test_interfaces_endpoint_returns_configured_inventory(async_client):
 
     assert response.status_code == 200
     interfaces = response.json()["interfaces"]
-    assert any(item["ip"] == "10.70.15.3" and "primary" in item["node_roles"] for item in interfaces)
-    assert any(item["ip"] == "10.71.15.3" and "backup" in item["node_roles"] for item in interfaces)
+    assert any(
+        item["ip"] == "10.70.15.3"
+        and item["zone"] == "main-video"
+        and item["purpose"] == "video"
+        and "primary" in item["node_roles"]
+        and "backup" in item["node_roles"]
+        for item in interfaces
+    )
+    assert any(
+        item["ip"] == "10.71.15.3"
+        and item["zone"] == "backup-video"
+        and item["purpose"] == "video"
+        for item in interfaces
+    )
+    assert any(
+        item["ip"] == "10.75.51.40"
+        and item["zone"] == "dmz-video"
+        and item["purpose"] == "video"
+        for item in interfaces
+    )
+    assert any(
+        item["ip"] == "10.75.15.3"
+        and item["zone"] == "management"
+        and item["purpose"] == "management"
+        and item["directions"] == []
+        for item in interfaces
+    )
+
+
+@pytest.mark.asyncio
+async def test_interfaces_endpoint_normalizes_legacy_env_inventory(async_client, monkeypatch):
+    monkeypatch.setenv(
+        "INTERFACE_INVENTORY_JSON",
+        '[{"id":"legacy-primary","label":"Legacy Primary","ip":"10.1.1.10","node_roles":"primary","directions":"input","network":"video","extra":"kept"}]',
+    )
+
+    response = await async_client.get("/api/interfaces")
+
+    assert response.status_code == 200
+    interfaces = response.json()["interfaces"]
+    assert interfaces == [
+        {
+            "id": "legacy-primary",
+            "label": "Legacy Primary",
+            "ip": "10.1.1.10",
+            "node_roles": ["primary"],
+            "directions": ["input"],
+            "network": "video",
+            "extra": "kept",
+            "purpose": "video",
+            "zone": "legacy-primary",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_interfaces_endpoint_invalid_env_inventory_falls_back_to_defaults(async_client, monkeypatch):
+    monkeypatch.setenv("INTERFACE_INVENTORY_JSON", "not-json")
+
+    response = await async_client.get("/api/interfaces")
+
+    assert response.status_code == 200
+    interfaces = response.json()["interfaces"]
+    assert any(item["zone"] == "main-video" for item in interfaces)
+    assert any(item["zone"] == "backup-video" for item in interfaces)
+    assert any(item["zone"] == "dmz-video" for item in interfaces)
+    assert any(item["zone"] == "management" for item in interfaces)
 
 
 @pytest.mark.asyncio

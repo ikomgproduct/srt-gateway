@@ -258,8 +258,32 @@ Interface inventory:
 
 - The UI fetches `/api/interfaces`.
 - Primary/backup input/output binding controls are dropdowns.
-- Dropdown options are filtered by role and direction.
-- Built-in defaults map primary to `10.70.15.3` and backup to `10.71.15.3`; production can override with `INTERFACE_INVENTORY_JSON`.
+- Worker binding dropdown options are filtered by role and direction.
+- Route source/destination dropdown options are filtered by video purpose and direction, excluding Management.
+- Built-in defaults map Main Video to `10.70.15.3`, Backup Video to `10.71.15.3`, DMZ Video to `10.75.51.40`, and Management to `10.75.15.3`; production can override with `INTERFACE_INVENTORY_JSON`.
+- `/api/interfaces` normalizes legacy inventory entries by filling `zone`, `purpose`, `network`, `node_roles`, and `directions`.
+
+## Network Zone Direction
+
+Product has confirmed a site-standard network-zone model for the next architecture cycle. The durable handoff is in `docs/network-zone-product-handoff.md`, and the Architect-to-Dev-Lead handoff is in `docs/network-zone-architect-handoff.md`.
+
+Target zones:
+
+- Main Video: `eno1`, `10.70.15.3`, internal video input/output.
+- Backup Video: `eno2`, `10.71.15.3`, internal video input/output.
+- DMZ Video: `eno3`, `10.75.51.40`, public/external video input/output.
+- Management: `eno4`, `10.75.15.3`, API, SSH, Grafana/admin, and internal control-plane communication.
+
+Architecture direction:
+
+- Separate worker role, network zone, and route direction.
+- Route endpoint dropdowns should filter by video purpose and input/output direction, not only by worker role.
+- Management must not appear as a media route endpoint.
+- DMZ Video must be selectable for input and output on both primary and backup workers.
+- Main Video and Backup Video should pair as internal redundant paths.
+- Production compose should support env-configurable worker UDP publishing across the required video IPs and port ranges.
+- `docker-compose.production.video-zones.yml` is the explicit optional override for publishing worker UDP ports on DMZ Video in addition to the base internal video bindings.
+- Direct DMZ bind support for UI/Grafana may remain for the current deployment, but Redis/Postgres must not be exposed to DMZ. A DMZ reverse proxy to management-bound services remains the safer future pattern.
 
 ## HLS Architecture
 

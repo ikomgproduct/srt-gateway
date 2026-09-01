@@ -60,10 +60,13 @@ Recommended production direction: **microservices mode with `docker-compose.prod
 
 Recommended facility layout:
 
-- **Management network:** API/UI, Redis, Postgres, worker heartbeats, leases, telemetry.
-- **Video network:** SRT/UDP/RIST/RTMP media ingress and egress.
+- **Main Video:** internal video input/output, for example `eno1 / 10.70.15.3`.
+- **Backup Video:** internal backup video input/output, for example `eno2 / 10.71.15.3`.
+- **DMZ Video:** external/public video input/output, for example `eno3 / 10.75.51.40`.
+- **Management:** API, SSH, Grafana/admin, Redis/Postgres access, worker heartbeats, leases, and telemetry, for example `eno4 / 10.75.15.3`.
 
 Keep control traffic and media traffic separated where possible.
+Management interfaces must not be selected as media route endpoints. DMZ Video is a media network and may be selected for source input or destination output.
 
 ### Management Network
 
@@ -109,6 +112,10 @@ When the `primary` node owns the service, FFmpeg uses the primary binding. When 
 If `node_bindings` does not contain the active node, the system falls back to legacy `local_bind_ip`. New services should prefer explicit input/output bindings.
 
 The UI populates primary/backup input/output binding dropdowns from `/api/interfaces`. Production deployments can override the built-in interface list with `INTERFACE_INVENTORY_JSON`.
+
+Route source and destination interface dropdowns are zone-aware. They show video interfaces that match the route direction and exclude Management. Worker binding dropdowns remain role-aware for primary/backup compatibility.
+
+`INTERFACE_INVENTORY_JSON` controls what the UI/API exposes as selectable route interfaces. Docker UDP publishing is controlled separately by compose/env values such as `PRIMARY_VIDEO_IP`, `BACKUP_VIDEO_IP`, and the optional DMZ video-zone override. The values should describe the same physical NICs, but they are used at different layers.
 
 ## Redundancy Model
 
@@ -206,6 +213,13 @@ Run the backup worker host:
 docker compose --env-file .env.production.backup.example -f docker-compose.production.yml up -d --build
 ```
 
+For worker hosts that also publish media on a DMZ video NIC, include the video-zone override:
+
+```powershell
+docker compose --env-file .env.production.primary.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml up -d --build
+docker compose --env-file .env.production.backup.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml up -d --build
+```
+
 Multi-server requirements:
 
 - `REDIS_URL` must point to a Redis instance reachable on the management network.
@@ -235,13 +249,26 @@ Run:
 docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d --build
 ```
 
+For the full four-zone site layout, include the explicit video-zone override so workers also publish on DMZ Video:
+
+```powershell
+docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml up -d --build
+```
+
 This default layout binds:
 
 ```text
 API/UI:         10.75.51.40:8000
 Grafana:        10.75.15.3:4000 and 10.75.51.40:4000
 worker-primary: 10.70.15.3:9000-9010/udp
-worker-backup:  10.71.15.3:9000-9010/udp
+worker-backup:  10.71.15.3:9011-9021/udp
+```
+
+With `docker-compose.production.video-zones.yml`, the default additional DMZ media bindings are:
+
+```text
+worker-primary DMZ: 10.75.51.40:9000-9010/udp
+worker-backup DMZ:  10.75.51.40:9011-9021/udp
 ```
 
 Important: two containers cannot publish the same UDP host ports on the same host IP. The production single-server example expects separate video IPs/NICs for primary and backup workers. If the hardware does not provide separate video IPs, change one worker's port range before deployment.
@@ -390,7 +417,7 @@ The Route Editor V2 UI is protocol-aware:
 - Destination controls support SRT, UDP, RTMP, RTMPS, RIST, or raw URL compatibility.
 - UDP source and destination controls include unicast/multicast type selection.
 - SRT source and destination controls include listener/caller mode plus default/custom Stream ID state.
-- SRT destination supports manual path redundancy as a secondary endpoint row in the structured config. This stores the path model only; worker failover behavior is still controlled by `target_node`, `ha_mode`, `failover_node`, and Redis leases.
+- SRT destination supports manual path redundancy as a secondary endpoint row in the structured config. Main Video defaults the secondary path to Backup Video, Backup Video defaults the secondary path to Main Video, and DMZ Video defaults the secondary path to DMZ Video until the operator overrides it. This stores the path model only; worker failover behavior is still controlled by `target_node`, `ha_mode`, `failover_node`, and Redis leases.
 - `pbkeylen` remains a top-level legacy field. It is not serialized inside `source.srt` or `destinations[].srt`.
 
 ### Network Fields

@@ -1,6 +1,64 @@
 # SRT Gateway Backlog
 
-## Current Priority: Route Editor V2 Product And Architecture Planning
+## Current Priority: Network-Zone Architecture Planning
+
+### 12. Architect Network-Zone Interface And Compose Model
+
+Status: Implemented - Ready For Review
+
+Goal:
+
+- Define the technical plan for site-standard network separation across Main Video, Backup Video, DMZ Video, and Management networks.
+
+Requirements:
+
+- Use `docs/network-zone-product-handoff.md` as the Product Lead handoff.
+- Model worker role, network zone, and route direction as separate concepts.
+- Keep Management out of media source/destination dropdowns.
+- Allow DMZ Video for both input and output on primary and backup workers.
+- Define Main Video and Backup Video paired internal path behavior.
+- Define whether paired path selection is automatic, operator-editable, or both.
+- Define a richer interface inventory schema with NIC name, IP, zone, purpose, directions, and worker role eligibility.
+- Define production compose/env strategy for publishing worker UDP ports on multiple video IPs.
+- Keep port ranges env-configurable.
+- Cover single-server HA and multi-server HA.
+- Preserve lab compatibility for fewer NICs or shared IPs.
+- Preserve the existing Route Editor V2 structured contract and flat compatibility fields.
+
+Acceptance:
+
+- Architecture doc has a network-zone section suitable for Dev Lead handoff.
+- Product brief and agent context agree on Main Video, Backup Video, DMZ Video, and Management purposes.
+- Architect plan calls out DMZ UI/Grafana exposure risk and direct-bind vs reverse-proxy choice.
+- Architect plan identifies files likely affected and test coverage required.
+
+Implementation notes:
+
+- Architect handoff prepared in `docs/network-zone-architect-handoff.md`.
+- Dev Lead implementer instructions prepared in `docs/network-zone-dev-lead-implementer-instructions.md`.
+- Dev Lead resolved the open technical questions:
+  - Use explicit optional Compose mappings or an override-file strategy; do not rely on comma-delimited env expansion for YAML port lists.
+  - Normalize interface inventory in `/api/interfaces`.
+  - Apply Main/Backup pairing defaults only to route path redundancy in this slice.
+- Implemented API inventory normalization and zone-aware built-in defaults.
+- Implemented zone-aware route endpoint dropdown filtering while preserving role-aware worker binding controls.
+- Implemented path redundancy pairing defaults for Main Video, Backup Video, and DMZ Video without changing worker target semantics.
+- Added `docker-compose.production.video-zones.yml` for explicit DMZ UDP publish mappings.
+- Updated production env examples, README, UI guide, architecture, and agent context for the four-zone model.
+- Site model:
+  - Main Video: `eno1`, `10.70.15.3`, internal video input/output.
+  - Backup Video: `eno2`, `10.71.15.3`, internal video input/output.
+  - DMZ Video: `eno3`, `10.75.51.40`, public/external video input/output.
+  - Management: `eno4`, `10.75.15.3`, API, SSH, Grafana/admin, and internal control-plane communication.
+- Product decision: DMZ Video is selectable for input/output on both workers.
+- Product decision: Main Video and Backup Video should pair as redundant internal paths.
+- Product decision: UI/Grafana user access comes through DMZ, but internal service communication remains on Management.
+- Product decision: UI labels should group interfaces as Main Video, Backup Video, and DMZ Video for now.
+- Product decision: worker UDP publish IPs and port ranges must be env-configurable.
+- QA added `tests/test_production_network_zone_static.py` to guard the optional DMZ video-zone compose override, split single-server port ranges, four-zone env inventory examples, Management exclusion from media inventory, and operator documentation.
+- QA verification: focused network/API/frontend tests passed with `43 passed`; full regression passed with `90 passed`; production compose renders passed for single-server, control-plane, primary, backup, and video-zone override variants.
+
+## Previous Priority: Route Editor V2 Product And Architecture Planning
 
 ### 6. Capture Engineering Feedback For Route Editor V2
 

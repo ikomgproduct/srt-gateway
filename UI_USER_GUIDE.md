@@ -5,8 +5,10 @@ This guide explains how to operate the SRT Gateway web interface after the syste
 For your physical server layout:
 
 - UI/API: `http://10.75.51.40:8000`
-- Primary video worker: `primary`, bound to Video Main `10.70.15.3`
-- Backup video worker: `backup`, bound to Video Backup `10.71.15.3`
+- Main Video: `eno1 / 10.70.15.3`
+- Backup Video: `eno2 / 10.71.15.3`
+- DMZ Video: `eno3 / 10.75.51.40`
+- Management: `eno4 / 10.75.15.3`
 - Monitoring: Grafana `http://10.75.15.3:4000`, Prometheus `http://10.75.15.3:9090`
 
 ## Opening The UI
@@ -199,7 +201,13 @@ For UDP sources, choose:
 
 #### Input Interface
 
-For network sources, choose the input interface from the dropdown. The list comes from the configured hardware inventory.
+For network sources, choose the input interface from the dropdown. The list comes from the configured hardware inventory and is grouped by network zone:
+
+- Main Video
+- Backup Video
+- DMZ Video
+
+Management is not shown as a media route interface.
 
 #### Source Address
 
@@ -215,10 +223,11 @@ For caller mode, enter the remote source IP or hostname.
 
 Enter the input port.
 
-For your compose layout, both workers expose:
+For the production single-server example, the default worker host port ranges are:
 
 ```text
-9000-9010/udp
+Primary worker: 9000-9010/udp
+Backup worker:  9011-9021/udp
 ```
 
 #### HLS Source URL
@@ -285,12 +294,15 @@ Fields:
 
 For listener-mode SRT, the input interface can bind the listening socket to a specific video NIC. For caller-mode SRT and UDP inputs, it is sent as `localaddr` where supported. For SRT/UDP destinations, the output interface is sent as destination `localaddr` where supported.
 
-For your server:
+For your server network zones:
 
 ```text
-Primary worker video IP: 10.70.15.3
-Backup worker video IP: 10.71.15.3
+Main Video:   10.70.15.3
+Backup Video: 10.71.15.3
+DMZ Video:    10.75.51.40
 ```
+
+These route interface choices are different from Docker UDP port publishing. The dropdown controls what FFmpeg uses for binding; compose/env files control which host IPs and UDP port ranges Docker publishes.
 
 ### Compatibility Notes
 
@@ -422,6 +434,14 @@ srt://10.70.20.50:9000?mode=caller&streamid=feed1
 #### SRT Path Redundancy
 
 For SRT destinations, `Enable manual path redundancy` adds a secondary output interface, address, and port to the structured service config.
+
+Default pairing behavior:
+
+- Main Video primary output defaults the secondary interface to Backup Video.
+- Backup Video primary output defaults the secondary interface to Main Video.
+- DMZ Video primary output defaults the secondary interface to DMZ Video.
+
+If you manually change the secondary interface, the UI preserves your override when saving or editing.
 
 This does not move the service between workers by itself. Worker ownership is still controlled by `Hardware Exec Node`, HA fields, and Redis leases.
 
@@ -688,17 +708,19 @@ The UI now shows explicit start errors. If no alert appears, check the status:
 
 ### Source Cannot Connect To Listener
 
-Check that the sender is using the correct video IP:
+Check that the sender is using the selected video IP:
 
 ```text
-Primary: 10.70.15.3
-Backup:  10.71.15.3
+Main Video:   10.70.15.3
+Backup Video: 10.71.15.3
+DMZ Video:    10.75.51.40
 ```
 
 Also verify the selected port is within the exposed range:
 
 ```text
-9000-9010/udp
+Primary worker default: 9000-9010/udp
+Backup worker default:  9011-9021/udp
 ```
 
 ### UI Not Reachable

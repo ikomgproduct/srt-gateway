@@ -26,6 +26,25 @@ Initial production target:
 
 The architecture should remain portable enough to support single-server and multi-server hardware layouts.
 
+Updated site network model for the next architecture cycle:
+
+- Main Video: `eno1`, `10.70.15.3`, internal video input/output.
+- Backup Video: `eno2`, `10.71.15.3`, internal video input/output.
+- DMZ Video: `eno3`, `10.75.51.40`, public/external video input/output.
+- Management: `eno4`, `10.75.15.3`, API, SSH, Grafana/admin, and internal control-plane communication.
+
+Product decisions for this model:
+
+- DMZ Video must be selectable for both input and output on both primary and backup workers.
+- Main Video and Backup Video are paired internal redundant paths.
+- If Main Video is selected as the primary internal path, the paired redundant path should use Backup Video.
+- If Backup Video is selected as the primary internal path, the paired redundant path should use Main Video.
+- Management should not be selectable as a media input/output route interface.
+- Operator access to UI/Grafana will come through DMZ, while internal service communication remains on Management.
+- Architect must decide whether UI/Grafana are bound directly on DMZ-facing IPs or exposed through a DMZ reverse proxy to management-bound services.
+- UI route interface choices should be grouped as Main Video, Backup Video, and DMZ Video for now.
+- Worker UDP publish IPs and port ranges must be configurable through env files.
+
 ## Core Workflows
 
 Operators must be able to:
@@ -35,6 +54,7 @@ Operators must be able to:
 - Configure destination output or HLS-only local output.
 - Select target worker role: primary, backup, or all.
 - Select video bind interfaces for primary and backup workers.
+- Select route input/output interfaces by network zone: Main Video, Backup Video, or DMZ Video.
 - Start, stop, edit, move, and delete services.
 - See current status, active input, destination, worker target, preview, HLS links, and errors.
 

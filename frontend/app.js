@@ -1,9 +1,13 @@
 const API_URL = window.location.origin + "/api";
 let servicesMap = {};
 let systemNodeRole = "primary";
+let secondaryInterfaceManuallyChanged = false;
+let hydratingRouteEndpoints = false;
 let interfaceInventory = [
-    { id: "primary-video-main", label: "Primary Video Main", ip: "10.70.15.3", node_roles: ["primary"], directions: ["input", "output"], network: "video" },
-    { id: "backup-video-backup", label: "Backup Video Backup", ip: "10.71.15.3", node_roles: ["backup"], directions: ["input", "output"], network: "video" }
+    { id: "main-video", label: "Main Video", ip: "10.70.15.3", nic: "eno1", zone: "main-video", purpose: "video", node_roles: ["primary", "backup"], directions: ["input", "output"], network: "video" },
+    { id: "backup-video", label: "Backup Video", ip: "10.71.15.3", nic: "eno2", zone: "backup-video", purpose: "video", node_roles: ["primary", "backup"], directions: ["input", "output"], network: "video" },
+    { id: "dmz-video", label: "DMZ Video", ip: "10.75.51.40", nic: "eno3", zone: "dmz-video", purpose: "video", node_roles: ["primary", "backup"], directions: ["input", "output"], network: "video" },
+    { id: "management", label: "Management", ip: "10.75.15.3", nic: "eno4", zone: "management", purpose: "management", node_roles: [], directions: [], network: "management" }
 ];
 
 function escapeHtml(value) {
@@ -185,18 +189,75 @@ function interfaceLabel(item) {
     return `${item.label || item.id || item.ip} (${item.ip})`;
 }
 
-function matchingInterfaces(role, direction) {
+function interfaceZone(item) {
+    return item.zone || item.network || "video";
+}
+
+function interfacePurpose(item) {
+    return item.purpose || (item.network === "video" ? "video" : item.network || "video");
+}
+
+function interfaceDirections(item) {
+    return Array.isArray(item.directions) ? item.directions : [];
+}
+
+function matchingRoleInterfaces(role, direction) {
     return interfaceInventory.filter(item => {
         const roles = item.node_roles || [];
-        const directions = item.directions || [];
+        const directions = interfaceDirections(item);
         return roles.includes(role) && directions.includes(direction);
     });
+}
+
+function matchingRouteInterfaces(direction) {
+    return interfaceInventory.filter(item => {
+        const purpose = interfacePurpose(item);
+        const zone = interfaceZone(item);
+        const directions = interfaceDirections(item);
+        return (purpose === "video" || item.network === "video")
+            && purpose !== "management"
+            && zone !== "management"
+            && directions.includes(direction);
+    });
+}
+
+function appendInterfaceOptions(select, options) {
+    const grouped = options.reduce((groups, item) => {
+        const zone = interfaceZone(item);
+        groups[zone] = groups[zone] || [];
+        groups[zone].push(item);
+        return groups;
+    }, {});
+
+    Object.entries(grouped).forEach(([zone, items]) => {
+        const group = document.createElement("optgroup");
+        group.label = zoneLabel(zone);
+        items.forEach(item => {
+            const option = document.createElement("option");
+            option.value = item.ip;
+            option.dataset.interfaceId = item.id || "";
+            option.dataset.zone = interfaceZone(item);
+            option.textContent = interfaceLabel(item);
+            group.appendChild(option);
+        });
+        select.appendChild(group);
+    });
+}
+
+function zoneLabel(zone) {
+    const labels = {
+        "main-video": "Main Video",
+        "backup-video": "Backup Video",
+        "dmz-video": "DMZ Video",
+        "management": "Management"
+    };
+    return labels[zone] || zone;
 }
 
 function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
     const select = document.getElementById(selectId);
     if (!select) return;
-    const options = matchingInterfaces(role, direction);
+    const options = matchingRoleInterfaces(role, direction);
     select.innerHTML = "";
 
     const emptyOption = document.createElement("option");
@@ -211,6 +272,30 @@ function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
         option.textContent = interfaceLabel(item);
         select.appendChild(option);
     });
+
+    if (selectedIp && !options.some(item => item.ip === selectedIp)) {
+        const preserved = document.createElement("option");
+        preserved.value = selectedIp;
+        preserved.dataset.interfaceId = "";
+        preserved.textContent = `Existing interface (${selectedIp})`;
+        select.appendChild(preserved);
+    }
+
+    select.value = selectedIp || "";
+}
+
+function populateRouteInterfaceSelect(selectId, direction, selectedIp = "") {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const options = matchingRouteInterfaces(direction);
+    select.innerHTML = "";
+
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "Default / not bound";
+    select.appendChild(emptyOption);
+
+    appendInterfaceOptions(select, options);
 
     if (selectedIp && !options.some(item => item.ip === selectedIp)) {
         const preserved = document.createElement("option");
@@ -292,21 +377,18 @@ function hydrateRouteEndpoint(prefix, endpoint = {}, fallback = {}) {
     const fieldMap = {
         source: {
             interfaceId: "sourceInterface",
-            role: "primary",
             direction: "input",
             addressId: "sourceIp",
             portId: "sourcePort"
         },
         destination: {
             interfaceId: "destinationInterface",
-            role: "primary",
             direction: "output",
             addressId: "destinationHost",
             portId: "destinationPort"
         },
         destinationSecondary: {
             interfaceId: "destinationSecondaryInterface",
-            role: "backup",
             direction: "output",
             addressId: "destinationSecondaryHost",
             portId: "destinationSecondaryPort"
@@ -314,7 +396,7 @@ function hydrateRouteEndpoint(prefix, endpoint = {}, fallback = {}) {
     };
     const fields = fieldMap[prefix];
     const bindIp = endpoint.bind_ip || fallback.bind_ip || "";
-    populateInterfaceSelect(fields.interfaceId, fields.role, fields.direction, bindIp);
+    populateRouteInterfaceSelect(fields.interfaceId, fields.direction, bindIp);
     document.getElementById(fields.addressId).value = endpoint.address || fallback.address || "";
     document.getElementById(fields.portId).value = endpoint.port || fallback.port || "";
 }
@@ -324,9 +406,37 @@ function populateRouteEndpointSelects(config = {}) {
     const destination = firstEnabledDestination(config.destinations || []) || {};
     const destinationEndpoint = destination.primary_endpoint || {};
     const secondaryEndpoint = destination.path_redundancy?.secondary_endpoint || {};
-    populateInterfaceSelect("sourceInterface", "primary", "input", sourceEndpoint.bind_ip || getExplicitInputBind(config, "primary"));
-    populateInterfaceSelect("destinationInterface", "primary", "output", destinationEndpoint.bind_ip || getExplicitOutputBind(config, "primary"));
-    populateInterfaceSelect("destinationSecondaryInterface", "backup", "output", secondaryEndpoint.bind_ip || getExplicitOutputBind(config, "backup"));
+    populateRouteInterfaceSelect("sourceInterface", "input", sourceEndpoint.bind_ip || getExplicitInputBind(config, "primary"));
+    populateRouteInterfaceSelect("destinationInterface", "output", destinationEndpoint.bind_ip || getExplicitOutputBind(config, "primary"));
+    populateRouteInterfaceSelect("destinationSecondaryInterface", "output", secondaryEndpoint.bind_ip || getExplicitOutputBind(config, "backup"));
+}
+
+function selectedRouteInterface(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select?.value) return null;
+    return interfaceInventory.find(item => item.ip === select.value) || null;
+}
+
+function pairedZone(zone) {
+    if (zone === "main-video") return "backup-video";
+    if (zone === "backup-video") return "main-video";
+    if (zone === "dmz-video") return "dmz-video";
+    return "";
+}
+
+function defaultPairedOutputInterface(primaryInterface) {
+    const zone = pairedZone(interfaceZone(primaryInterface || {}));
+    if (!zone) return null;
+    return matchingRouteInterfaces("output").find(item => interfaceZone(item) === zone) || null;
+}
+
+function applyPairedSecondaryInterfaceDefault() {
+    if (secondaryInterfaceManuallyChanged || !document.getElementById("pathRedundancyEnabled").checked) return;
+    const paired = defaultPairedOutputInterface(selectedRouteInterface("destinationInterface"));
+    if (!paired) return;
+    hydratingRouteEndpoints = true;
+    populateRouteInterfaceSelect("destinationSecondaryInterface", "output", paired.ip);
+    hydratingRouteEndpoints = false;
 }
 
 function buildStreamIdConfig(scope) {
@@ -604,6 +714,7 @@ function populateDestinationBuilder(destinationUrl = "") {
     document.getElementById("destinationTos").value = "";
     document.getElementById("destinationMaxBitrateKbps").value = "";
     document.getElementById("pathRedundancyEnabled").checked = false;
+    secondaryInterfaceManuallyChanged = false;
     hydrateStreamIdConfig("destination", {});
     document.getElementById("destinationUrl").value = destinationUrl || "";
 
@@ -939,6 +1050,8 @@ function hydrateDestinationConfig(config = {}) {
         address: "",
         port: ""
     });
+    secondaryInterfaceManuallyChanged = !!redundancy.secondary_endpoint?.bind_ip;
+    applyPairedSecondaryInterfaceDefault();
     syncDestinationUrlPreview();
 }
 
@@ -955,6 +1068,7 @@ function closeModal(id) {
     document.getElementById("sourceProtocol").value = "srt";
     document.getElementById("destinationBuilderProtocol").value = "srt";
     document.getElementById("normalDestinationEnabled").checked = true;
+    secondaryInterfaceManuallyChanged = false;
     setTargetNodeForCreate();
     hydrateStreamIdConfig("source", {});
     hydrateStreamIdConfig("destination", {});
@@ -978,6 +1092,14 @@ function closeModal(id) {
 ].forEach(id => document.getElementById(id).addEventListener("change", setRouteEditorVisibility));
 
 document.getElementById("enableFullHls").addEventListener("change", setHlsControlVisibility);
+
+document.getElementById("pathRedundancyEnabled").addEventListener("change", applyPairedSecondaryInterfaceDefault);
+
+document.getElementById("destinationInterface").addEventListener("change", applyPairedSecondaryInterfaceDefault);
+
+document.getElementById("destinationSecondaryInterface").addEventListener("change", () => {
+    if (!hydratingRouteEndpoints) secondaryInterfaceManuallyChanged = true;
+});
 
 document.getElementById("destinationBuilderProtocol").addEventListener("change", () => {
     if (document.getElementById("destinationBuilderProtocol").value !== "raw") {

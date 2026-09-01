@@ -12,8 +12,8 @@ def test_hls_copy_uses_config_id():
 def test_frontend_assets_are_versioned_for_release_cache_busting():
     index_html = Path("frontend/index.html").read_text()
 
-    assert 'href="style.css?v=route-editor-v2-ui-reviewer-fixes"' in index_html
-    assert 'src="app.js?v=route-editor-v2-ui-reviewer-fixes"' in index_html
+    assert 'href="style.css?v=network-zone-routing"' in index_html
+    assert 'src="app.js?v=network-zone-routing"' in index_html
     assert 'href="style.css"' not in index_html
     assert 'src="app.js"></script>' not in index_html
 
@@ -79,6 +79,7 @@ def test_binding_fields_are_present_and_submitted():
     assert 'id="primaryInputBindIp" class="form-control-select"' in index_html
     assert "function buildNodeBindingsFromForm" in app_js
     assert "function populateInterfaceSelect" in app_js
+    assert "function matchingRoleInterfaces" in app_js
     assert "/interfaces" in app_js
     assert "input_bind_ip" in app_js
     assert "output_bind_ip" in app_js
@@ -94,6 +95,53 @@ def test_binding_form_uses_explicit_values_not_legacy_fallback():
     assert 'populateInterfaceSelect("primaryInputBindIp", "primary", "input", getExplicitInputBind(config, "primary"));' in app_js
     assert 'populateInterfaceSelect("backupNodeOutputBindIp", "backup", "output", getExplicitOutputBind(config, "backup"));' in app_js
     assert 'document.getElementById("primaryInputBindIp").value = getEffectiveInputBind' not in app_js
+
+
+def test_route_interface_filtering_is_zone_aware_and_excludes_management():
+    app_js = Path("frontend/app.js").read_text()
+
+    assert "function matchingRouteInterfaces" in app_js
+    assert 'purpose === "video" || item.network === "video"' in app_js
+    assert 'purpose !== "management"' in app_js
+    assert 'zone !== "management"' in app_js
+    assert 'populateRouteInterfaceSelect("sourceInterface", "input"' in app_js
+    assert 'populateRouteInterfaceSelect("destinationInterface", "output"' in app_js
+    assert 'populateRouteInterfaceSelect("destinationSecondaryInterface", "output"' in app_js
+    assert 'populateInterfaceSelect("sourceInterface", "primary"' not in app_js
+    assert 'populateInterfaceSelect("destinationInterface", "primary"' not in app_js
+
+
+def test_route_interface_options_are_grouped_by_zone():
+    app_js = Path("frontend/app.js").read_text()
+
+    assert "function appendInterfaceOptions" in app_js
+    assert 'document.createElement("optgroup")' in app_js
+    assert "group.label = zoneLabel(zone)" in app_js
+    assert '"main-video": "Main Video"' in app_js
+    assert '"backup-video": "Backup Video"' in app_js
+    assert '"dmz-video": "DMZ Video"' in app_js
+
+
+def test_path_redundancy_pairing_defaults_are_scoped_to_route_paths():
+    app_js = Path("frontend/app.js").read_text()
+
+    assert "function pairedZone" in app_js
+    assert 'if (zone === "main-video") return "backup-video";' in app_js
+    assert 'if (zone === "backup-video") return "main-video";' in app_js
+    assert 'if (zone === "dmz-video") return "dmz-video";' in app_js
+    assert "function applyPairedSecondaryInterfaceDefault" in app_js
+    assert 'document.getElementById("pathRedundancyEnabled").checked' in app_js
+    assert 'document.getElementById("destinationInterface").addEventListener("change", applyPairedSecondaryInterfaceDefault)' in app_js
+
+
+def test_path_redundancy_manual_secondary_override_is_preserved():
+    app_js = Path("frontend/app.js").read_text()
+
+    assert "let secondaryInterfaceManuallyChanged = false;" in app_js
+    assert "let hydratingRouteEndpoints = false;" in app_js
+    assert 'if (!hydratingRouteEndpoints) secondaryInterfaceManuallyChanged = true;' in app_js
+    assert "secondaryInterfaceManuallyChanged = !!redundancy.secondary_endpoint?.bind_ip;" in app_js
+    assert "if (secondaryInterfaceManuallyChanged" in app_js
 
 
 def test_modal_uses_wider_css_layout():

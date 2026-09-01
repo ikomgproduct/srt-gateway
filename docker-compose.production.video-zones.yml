@@ -1,0 +1,14 @@
+# Optional production override for sites with dedicated internal video and DMZ video NICs.
+# Use with docker-compose.production.yml when workers must publish UDP ports on both
+# their internal video network and the DMZ video network.
+#
+# Example:
+# docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml config
+services:
+  worker-primary:
+    ports:
+      - "${PRIMARY_DMZ_VIDEO_IP:-10.75.51.40}:${PRIMARY_DMZ_PORT_RANGE:-9000-9010}:9000-9010/udp"
+
+  worker-backup:
+    ports:
+      - "${BACKUP_DMZ_VIDEO_IP:-10.75.51.40}:${BACKUP_DMZ_PORT_RANGE:-9011-9021}:9000-9010/udp"

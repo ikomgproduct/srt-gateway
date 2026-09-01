@@ -35,30 +35,79 @@ HEARTBEAT_PREFIX = "worker_heartbeat:"
 
 DEFAULT_INTERFACE_INVENTORY = [
     {
-        "id": "primary-video-main",
-        "label": "Primary Video Main",
+        "id": "main-video",
+        "label": "Main Video",
         "ip": "10.70.15.3",
-        "node_roles": ["primary"],
-        "directions": ["input", "output"],
-        "network": "video",
-    },
-    {
-        "id": "backup-video-backup",
-        "label": "Backup Video Backup",
-        "ip": "10.71.15.3",
-        "node_roles": ["backup"],
-        "directions": ["input", "output"],
-        "network": "video",
-    },
-    {
-        "id": "api-management",
-        "label": "Management API/UI",
-        "ip": "10.75.51.40",
+        "nic": "eno1",
+        "zone": "main-video",
+        "purpose": "video",
         "node_roles": ["primary", "backup"],
+        "directions": ["input", "output"],
+        "network": "video",
+    },
+    {
+        "id": "backup-video",
+        "label": "Backup Video",
+        "ip": "10.71.15.3",
+        "nic": "eno2",
+        "zone": "backup-video",
+        "purpose": "video",
+        "node_roles": ["primary", "backup"],
+        "directions": ["input", "output"],
+        "network": "video",
+    },
+    {
+        "id": "dmz-video",
+        "label": "DMZ Video",
+        "ip": "10.75.51.40",
+        "nic": "eno3",
+        "zone": "dmz-video",
+        "purpose": "video",
+        "node_roles": ["primary", "backup"],
+        "directions": ["input", "output"],
+        "network": "video",
+    },
+    {
+        "id": "management",
+        "label": "Management",
+        "ip": "10.75.15.3",
+        "nic": "eno4",
+        "zone": "management",
+        "purpose": "management",
+        "node_roles": [],
         "directions": [],
         "network": "management",
     },
 ]
+
+
+def _as_string_list(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None]
+    if isinstance(value, str) and value:
+        return [value]
+    return []
+
+
+def normalize_interface_inventory_item(item: dict) -> dict:
+    normalized = dict(item)
+    network = normalized.get("network")
+    purpose = normalized.get("purpose")
+    zone = normalized.get("zone")
+
+    if not purpose:
+        purpose = "video" if network == "video" else network or "video"
+    if not network:
+        network = "video" if purpose == "video" else purpose
+    if not zone:
+        zone = normalized.get("id") or network
+
+    normalized["network"] = network
+    normalized["purpose"] = purpose
+    normalized["zone"] = zone
+    normalized["node_roles"] = _as_string_list(normalized.get("node_roles"))
+    normalized["directions"] = _as_string_list(normalized.get("directions"))
+    return normalized
 
 
 def load_interface_inventory() -> list[dict]:
@@ -67,10 +116,10 @@ def load_interface_inventory() -> list[dict]:
         try:
             data = json.loads(raw)
             if isinstance(data, list):
-                return data
+                return [normalize_interface_inventory_item(item) for item in data if isinstance(item, dict)]
         except json.JSONDecodeError:
             pass
-    return DEFAULT_INTERFACE_INVENTORY
+    return [normalize_interface_inventory_item(item) for item in DEFAULT_INTERFACE_INVENTORY]
 
 
 def full_hls_enabled(config: dict) -> bool:
