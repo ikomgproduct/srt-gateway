@@ -11,8 +11,17 @@ import asyncio
 import redis.asyncio as redis
 from api.database import engine, Base, get_db, AsyncSessionLocal
 from api.models import ServiceModel
+from api.multicast_admission import multicast_admission_guard
 from api.route_normalizer import normalize_service_payload
 from api.schemas import ServiceConfigRequest
+from backend.multicast_policy import (
+    MulticastPolicyError,
+    eligible_roles,
+    is_udp_multicast,
+    multicast_bind_keys,
+    multicast_port_policy,
+    validate_multicast_config,
+)
 
 
 @asynccontextmanager
@@ -156,6 +165,49 @@ async def enforce_full_hls_service_limit(db: AsyncSession, data: dict, exclude_i
     if count >= limit:
         raise HTTPException(status_code=422, detail=f"Full HLS service limit reached ({limit})")
 
+
+def validate_multicast_policy(data: dict) -> None:
+    if not is_udp_multicast(data):
+        return
+    inventory = load_interface_inventory()
+    roles = eligible_roles(data)
+    if not roles:
+        roles = [None]
+    for role in roles:
+        validate_multicast_config(data, role=role, inventory=inventory)
+
+
+def enforce_multicast_configuration(data: dict) -> None:
+    try:
+        validate_multicast_policy(data)
+    except MulticastPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def enforce_multicast_bind_conflicts(
+    db: AsyncSession,
+    data: dict,
+    exclude_id: str | None = None,
+) -> None:
+    if not data.get("enabled") or not is_udp_multicast(data):
+        return
+    requested = multicast_bind_keys(data)
+    result = await db.execute(select(ServiceModel))
+    for service in result.scalars().all():
+        if service.id == exclude_id or not service.enabled:
+            continue
+        existing = normalize_service_payload(service_to_dict(service))
+        overlap = requested.intersection(multicast_bind_keys(existing))
+        if overlap:
+            bind_ip, port = sorted(overlap)[0]
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"UDP multicast bind {bind_ip}:{port} conflicts with enabled service "
+                    f"{service.name} ({service.id})"
+                ),
+            )
+
 async def ensure_schema_columns():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -212,12 +264,33 @@ def service_has_eligible_worker(config: dict, worker_roles: set[str]) -> bool:
 async def startup():
     global redis_client, hardware_metrics_task
     # Automatically generate Database Tables natively avoiding Alembic migrations for standalone deployments
+    multicast_port_policy()
     await ensure_schema_columns()
     redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost"))
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(ServiceModel))
         for service in result.scalars().all():
-            await sync_desired_config(service.id, service_to_dict(service))
+            data = normalize_service_payload(service_to_dict(service))
+            if data.get("enabled") and is_udp_multicast(data):
+                try:
+                    validate_multicast_policy(data)
+                    await enforce_multicast_bind_conflicts(session, data, exclude_id=service.id)
+                except (MulticastPolicyError, HTTPException) as exc:
+                    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                    await sync_desired_config(service.id, None)
+                    await redis_client.hset(
+                        "stream_metrics_cache",
+                        service.id,
+                        json.dumps({
+                            "status": "error",
+                            "active_input": "main",
+                            "error_msg": detail,
+                            "error_code": getattr(exc, "code", "multicast_bind_conflict"),
+                            "retryable": False,
+                        }),
+                    )
+                    continue
+            await sync_desired_config(service.id, data)
     hardware_metrics_task = asyncio.create_task(hardware_metrics_loop())
 
 async def shutdown():
@@ -272,6 +345,8 @@ async def get_services(db: AsyncSession = Depends(get_db)):
             "status": status,
             "active_input": stats.get("active_input", "main"),
             "error_msg": error_msg,
+            "error_code": stats.get("error_code"),
+            "retryable": stats.get("retryable"),
             "online_workers": sorted(worker_roles)
         })
     return out
@@ -284,6 +359,12 @@ async def get_workers():
 async def get_interfaces():
     return {"interfaces": load_interface_inventory()}
 
+
+@app.get("/api/runtime-policy")
+async def get_runtime_policy():
+    minimum, maximum = multicast_port_policy()
+    return {"udp_multicast": {"min_port": minimum, "max_port": maximum}}
+
 @app.post("/api/services")
 async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depends(get_db)):
     import uuid
@@ -293,10 +374,21 @@ async def create_service(config: ServiceConfigRequest, db: AsyncSession = Depend
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not data.get("id"):
         data["id"] = str(uuid.uuid4())
+    enforce_multicast_configuration(data)
     await enforce_full_hls_service_limit(db, data)
     db_item = ServiceModel(**data)
-    db.add(db_item)
-    await db.commit()
+    if data.get("enabled") and is_udp_multicast(data):
+        try:
+            async with multicast_admission_guard(db):
+                await enforce_multicast_bind_conflicts(db, data)
+                db.add(db_item)
+                await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    else:
+        db.add(db_item)
+        await db.commit()
     
     if data.get("enabled"):
         await sync_desired_config(data["id"], data)
@@ -312,9 +404,20 @@ async def update_service(service_id: str, config: ServiceConfigRequest, db: Asyn
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     data["id"] = service_id
+    enforce_multicast_configuration(data)
     await enforce_full_hls_service_limit(db, data, exclude_id=service_id)
-    await db.merge(ServiceModel(**data))
-    await db.commit()
+    if data.get("enabled") and is_udp_multicast(data):
+        try:
+            async with multicast_admission_guard(db):
+                await enforce_multicast_bind_conflicts(db, data, exclude_id=service_id)
+                await db.merge(ServiceModel(**data))
+                await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+    else:
+        await db.merge(ServiceModel(**data))
+        await db.commit()
     
     await sync_desired_config(service_id, data)
     await redis_client.publish("stream_commands", json.dumps({"action": "stop", "id": service_id}))
@@ -334,13 +437,25 @@ async def delete_service(service_id: str, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/services/{service_id}/start")
 async def start_service(service_id: str, use_backup: bool = False, db: AsyncSession = Depends(get_db)):
-    item = await db.get(ServiceModel, service_id)
-    if not item: raise HTTPException(404)
-    candidate = service_to_dict(item)
-    candidate["enabled"] = True
-    await enforce_full_hls_service_limit(db, candidate, exclude_id=service_id)
-    item.enabled = True
-    await db.commit()
+    try:
+        async with multicast_admission_guard(db):
+            item = await db.get(ServiceModel, service_id)
+            if not item:
+                raise HTTPException(404)
+            candidate = service_to_dict(item)
+            candidate["enabled"] = True
+            try:
+                normalized_candidate = normalize_service_payload(candidate)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            enforce_multicast_configuration(normalized_candidate)
+            await enforce_full_hls_service_limit(db, normalized_candidate, exclude_id=service_id)
+            await enforce_multicast_bind_conflicts(db, normalized_candidate, exclude_id=service_id)
+            item.enabled = True
+            await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     
     d = service_to_dict(item)
     await sync_desired_config(service_id, d)

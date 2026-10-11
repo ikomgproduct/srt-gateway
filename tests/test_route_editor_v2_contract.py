@@ -94,7 +94,12 @@ async def test_structured_udp_multicast_source_derives_legacy_fields(async_clien
         "source": {
             "protocol": "udp",
             "type": "multicast",
-            "primary_endpoint": {"address": "239.30.30.30", "port": 9011},
+            "primary_endpoint": {
+                "interface_id": "main-video",
+                "bind_ip": "10.70.15.3",
+                "address": "239.30.30.30",
+                "port": 9011,
+            },
         },
         "enabled": False,
     }

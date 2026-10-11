@@ -1,6 +1,8 @@
 from copy import deepcopy
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
+from backend.multicast_policy import is_ipv4_multicast
+
 
 NORMAL_DESTINATION_PROTOCOLS = {"srt", "udp", "rtmp", "rtmps", "rist", "raw"}
 
@@ -49,7 +51,7 @@ def _source_from_flat(data: dict) -> dict | None:
         "path": data.get("source_path") or "",
     }
     if protocol == "udp":
-        source["type"] = "unicast"
+        source["type"] = "multicast" if is_ipv4_multicast(data.get("source_ip")) else "unicast"
     if protocol == "srt":
         srt = {}
         if data.get("latency_ms") is not None:

@@ -49,7 +49,7 @@ Use this for:
 
 Compose files:
 
-- `docker-compose.production.yml` for production layouts with management-bound API/Grafana and primary/backup worker profiles
+- `docker-compose.production.yml` for production layouts with explicit API/Grafana bind IPs and primary/backup worker profiles
 - `docker-compose-microservices.yml` for local/lab testing
 - `docker-compose-microservices-ha.yml` for legacy/lab HA testing
 - `docker-compose-microservices-gpu.yml` for legacy/lab GPU testing
@@ -74,9 +74,11 @@ These values should use management-network DNS/IPs:
 
 - `DATABASE_URL`
 - `REDIS_URL`
-- API/UI access
-- Prometheus/Grafana access
 - worker heartbeat and lease traffic
+
+Current production examples bind API/UI and Grafana to explicit operator-facing IPs through `API_BIND_IP`, `GRAFANA_BIND_IP`, and `GRAFANA_ALT_BIND_IP`. In the site examples, API/UI is directly DMZ-accessible on `10.75.51.40:8000`, while Grafana is bound on both `10.75.15.3:4000` and `10.75.51.40:4000`. Redis/Postgres must not be exposed to DMZ; keep them Docker-internal for single-server or management-network-only for multi-server HA.
+
+A future hardening option is to bind API/UI and Grafana only on Management and expose them through a DMZ reverse proxy.
 
 ### Video Network
 
@@ -115,7 +117,7 @@ The UI populates primary/backup input/output binding dropdowns from `/api/interf
 
 Route source and destination interface dropdowns are zone-aware. They show video interfaces that match the route direction and exclude Management. Worker binding dropdowns remain role-aware for primary/backup compatibility.
 
-`INTERFACE_INVENTORY_JSON` controls what the UI/API exposes as selectable route interfaces. Docker UDP publishing is controlled separately by compose/env values such as `PRIMARY_VIDEO_IP`, `BACKUP_VIDEO_IP`, and the optional DMZ video-zone override. The values should describe the same physical NICs, but they are used at different layers.
+`INTERFACE_INVENTORY_JSON` controls what the UI/API exposes as selectable route interfaces. Production workers use host networking and bind the selected inventory IP directly; the optional video-zone override is retained only as an empty one-release compatibility file.
 
 ## Redundancy Model
 
@@ -171,6 +173,98 @@ Failback:
 
 ## Deployment Options
 
+### Which Production Compose File To Use
+
+For every new production or production-like installation, use only:
+
+```text
+docker-compose.production.yml
+```
+
+`docker-compose.production.yml` is the canonical deployment definition for
+both supported hardware layouts. `COMPOSE_PROFILES` in the selected environment
+file determines which services run on that host.
+
+| Installation | Environment template | Enabled profiles |
+| --- | --- | --- |
+| One server, two workers | `.env.production.single-server.example` | `local-state,control-plane,primary-worker,backup-worker` |
+| Multi-server control plane | `.env.production.control-plane.example` | `local-state,control-plane` by default |
+| Multi-server primary worker | `.env.production.primary.example` | `primary-worker` |
+| Multi-server backup worker | `.env.production.backup.example` | `backup-worker` |
+
+`docker-compose.production.video-zones.yml` is **not an additional production
+topology and is not required for a new installation**. It is an empty,
+one-release compatibility override retained only for servers or scripts that
+still use the former two-file command. This old command remains valid but has
+the same effective configuration as the canonical one-file command:
+
+```bash
+sudo docker compose --env-file .env.production.single-server.local \
+  -f docker-compose.production.yml \
+  -f docker-compose.production.video-zones.yml \
+  up -d --build
+```
+
+Do not add interface addresses, port ranges, or services to the compatibility
+file. Configure media interfaces through `INTERFACE_INVENTORY_JSON`; production
+workers use Linux host networking and bind the selected host IP and service
+port directly. The compatibility file is planned for removal after the
+migration window.
+
+### Prepare A Server-Local Environment File
+
+Do not run production from a committed `.example` file. Copy the template for
+the host, edit the `.local` copy, and keep that copy server-local:
+
+```bash
+# Single-server HA
+cp .env.production.single-server.example .env.production.single-server.local
+chmod 600 .env.production.single-server.local
+
+# Multi-server: run only the matching copy command on each host
+cp .env.production.control-plane.example .env.production.control-plane.local
+cp .env.production.primary.example .env.production.primary.local
+cp .env.production.backup.example .env.production.backup.local
+```
+
+Files matching `.env.production.*.local` are excluded from Git and the Docker
+build context. Preserve them separately before replacing a checkout or server.
+
+Required configuration:
+
+| Variable | Purpose |
+| --- | --- |
+| `COMPOSE_PROFILES` | Selects the services for this host. Use the profile combinations in the table above. |
+| `API_BIND_IP` | Host IP for API/UI TCP port `8000`; current site design uses the DMZ-facing operator IP. |
+| `GRAFANA_BIND_IP`, `GRAFANA_ALT_BIND_IP` | Host IPs for Grafana TCP port `4000`. Both values must exist on a single host when both mappings are enabled. |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `DATABASE_URL` | Database credentials and API connection. Replace every `change-me` value. |
+| `REDIS_PASSWORD`, `REDIS_BIND_IP`, `REDIS_PORT`, `REDIS_URL` | Redis authentication, publication, and control-plane connection. Use loopback on one server or Management on multiple servers. |
+| `WORKER_REDIS_URL` | Authenticated Redis URL used by host-network workers. It cannot use the Docker service name from the host network. |
+| `UDP_MULTICAST_PORT_MIN`, `UDP_MULTICAST_PORT_MAX` | Administrator-approved multicast source-port policy. Default: `1024-65535`. These values do not edit the host firewall. |
+| `INTERFACE_INVENTORY_JSON` | NIC/IP inventory shown in route and worker binding dropdowns. Management entries must have no media directions or worker roles. |
+| `PREVIEW_STORAGE` | Named volume for one server or a shared filesystem path mounted identically on all multi-server hosts. |
+| `MAX_FULL_HLS_SERVICES`, `HLS_MIN_FREE_BYTES`, `HLS_STORAGE_QUOTA_BYTES` | Full-HLS capacity and storage guardrails. |
+| `GRAFANA_ADMIN_PASSWORD` | Required Grafana administrator password. Replace `change-me`. |
+
+The old `PRIMARY_VIDEO_IP`, `BACKUP_VIDEO_IP`, `PRIMARY_PORT_RANGE`, and
+`BACKUP_PORT_RANGE` variables do not control the current host-network workers
+and should not be added to new production env files.
+
+Before starting containers, validate the rendered configuration:
+
+```bash
+sudo docker compose --env-file .env.production.single-server.local \
+  -f docker-compose.production.yml config --quiet
+```
+
+After any environment-file change, recreate the affected services so the new
+values and host bindings take effect:
+
+```bash
+sudo docker compose --env-file .env.production.single-server.local \
+  -f docker-compose.production.yml up -d --build --force-recreate
+```
+
 ### Option 1: Multi-Server HA
 
 Recommended for facility redundancy.
@@ -195,34 +289,30 @@ Backup worker host:
 
 Run the control plane:
 
-```powershell
-docker compose --env-file .env.production.control-plane.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.control-plane.local -f docker-compose.production.yml up -d --build
 ```
 
 The control-plane example includes `local-state` when this host owns Redis/Postgres. If Redis/Postgres are external or managed separately, remove `local-state` from `COMPOSE_PROFILES` and set `DATABASE_URL` / `REDIS_URL` to the management-network addresses.
 
 Run the primary worker host:
 
-```powershell
-docker compose --env-file .env.production.primary.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.primary.local -f docker-compose.production.yml up -d --build
 ```
 
 Run the backup worker host:
 
-```powershell
-docker compose --env-file .env.production.backup.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.backup.local -f docker-compose.production.yml up -d --build
 ```
 
-For worker hosts that also publish media on a DMZ video NIC, include the video-zone override:
-
-```powershell
-docker compose --env-file .env.production.primary.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml up -d --build
-docker compose --env-file .env.production.backup.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml up -d --build
-```
+Production workers use Linux host networking and can bind directly to eligible Main Video, Backup Video, and DMZ Video addresses. The former video-zone override is no longer required; it remains as an empty compatibility file for one release.
 
 Multi-server requirements:
 
-- `REDIS_URL` must point to a Redis instance reachable on the management network.
+- `WORKER_REDIS_URL` must point to an authenticated Redis instance reachable on the management network.
+- `REDIS_URL` is the authenticated bridge/control-plane URL used by API and telemetry.
 - `DATABASE_URL` must point to a Postgres instance reachable by the API.
 - `PREVIEW_STORAGE` must be a shared filesystem path mounted on the control-plane and worker hosts, for example `/mnt/srt-gateway/previews`.
 - The shared preview path is required for UI thumbnails and HLS playlists generated by workers.
@@ -245,14 +335,8 @@ This starts:
 
 Run:
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d --build
-```
-
-For the full four-zone site layout, include the explicit video-zone override so workers also publish on DMZ Video:
-
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml -f docker-compose.production.video-zones.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml up -d --build
 ```
 
 This default layout binds:
@@ -260,20 +344,26 @@ This default layout binds:
 ```text
 API/UI:         10.75.51.40:8000
 Grafana:        10.75.15.3:4000 and 10.75.51.40:4000
-worker-primary: 10.70.15.3:9000-9010/udp
-worker-backup:  10.71.15.3:9011-9021/udp
+worker-primary: Linux host network; selected video IP and service UDP port
+worker-backup:  Linux host network; selected video IP and service UDP port
+Redis:         127.0.0.1:6379 with authentication
 ```
 
-With `docker-compose.production.video-zones.yml`, the default additional DMZ media bindings are:
+UDP multicast sources may use an administrator-approved port from `1024-65535`. FFmpeg binds only the configured service port and interface; Compose does not reserve or publish the full range. Different service IDs cannot use the same input bind IP and port while enabled.
 
-```text
-worker-primary DMZ: 10.75.51.40:9000-9010/udp
-worker-backup DMZ:  10.75.51.40:9011-9021/udp
-```
+Single-server mode publishes authenticated Redis on loopback for host-network workers, keeps Postgres Docker-internal, and uses the Docker named volume `shared_previews` for previews/HLS.
 
-Important: two containers cannot publish the same UDP host ports on the same host IP. The production single-server example expects separate video IPs/NICs for primary and backup workers. If the hardware does not provide separate video IPs, change one worker's port range before deployment.
+### Host-Network And Redis Migration
 
-Single-server mode keeps Redis/Postgres Docker-internal and uses the Docker named volume `shared_previews` for previews/HLS.
+Production host-network workers require Linux. Before upgrading, verify every inventory IP exists on the intended worker host, allow the configured UDP multicast policy through the host firewall, and confirm the switches permit IGMP membership on Main Video, Backup Video, and DMZ Video.
+
+1. Copy the matching `.env.production.*.example` to your server-local env file without overwriting local addresses or credentials.
+2. Add `REDIS_PASSWORD`, authenticated `REDIS_URL`, authenticated `WORKER_REDIS_URL`, `REDIS_BIND_IP`, `REDIS_PORT`, and `UDP_MULTICAST_PORT_MIN/MAX`.
+3. On a single server, use loopback for `REDIS_BIND_IP` and `WORKER_REDIS_URL`. For multiple servers, use the firewall-restricted Management IP.
+4. Recreate Redis, API, telemetry, and both workers together so Redis authentication and clients change atomically.
+5. Verify `/api/runtime-policy`, `/api/workers`, worker heartbeats, and a real multicast source before enabling production routes.
+
+Rollback requires the prior release's Compose and matching env file, including its bounded worker port mappings and unauthenticated Redis URLs. Stop the current stack before restoring that complete set; do not mix old clients with authenticated Redis or host-network workers.
 
 ### Lab And Legacy Compose Files
 
@@ -290,8 +380,8 @@ They expose broader host ports, use demo credentials, and may use tmpfs preview 
 
 ### Production Single-Server HA
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml up -d --build
 ```
 
 Open:
@@ -303,20 +393,20 @@ Open:
 
 On the control-plane host:
 
-```powershell
-docker compose --env-file .env.production.control-plane.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.control-plane.local -f docker-compose.production.yml up -d --build
 ```
 
 On the primary worker host:
 
-```powershell
-docker compose --env-file .env.production.primary.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.primary.local -f docker-compose.production.yml up -d --build
 ```
 
 On the backup worker host:
 
-```powershell
-docker compose --env-file .env.production.backup.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.backup.local -f docker-compose.production.yml up -d --build
 ```
 
 ### Local Microservices Lab
@@ -410,6 +500,8 @@ The API also accepts additive structured route fields for the Route Editor V2 co
 | `destinations` | Optional list of protocol-aware normal destinations. This release supports one enabled normal destination and derives `destination_url` for current workers. Additional generated HLS outputs remain configured through `hls_outputs`, not `destinations`. |
 
 The existing flat fields remain supported for compatibility. The browser UI now writes these structured fields while preserving flat worker-compatible fields. Broader FFmpeg structured runtime mapping remains a future backlog item.
+
+The configured multicast policy range defines accepted source ports. Production host-network workers bind the selected host interface and service port directly, so there is no separate Docker-published worker port window.
 
 The Route Editor V2 UI is protocol-aware:
 
@@ -592,9 +684,10 @@ docker compose -f docker-compose-microservices.yml exec -T api python -m pytest 
 ## Production Caveats
 
 - Default compose passwords are demo values. Change Postgres and Grafana credentials.
-- Lab compose exposes Redis on host port `6379`. Production compose keeps Redis internal in single-server mode unless you explicitly expose or provide external Redis for multi-server HA.
+- Lab compose exposes Redis on host port `6379`. Production Redis requires authentication and binds to loopback for single-server or Management only for multi-server HA.
 - For multi-server HA, Redis/Postgres must themselves be reliable and reachable on the management network.
-- For one-server two-worker HA, duplicate UDP host ports require either separate video IPs/NICs or shifted host port mappings.
+- Host-network workers share the host namespace. The API rejects enabled services that would claim the same input bind IP and UDP port.
+- Invalid bind interfaces, out-of-policy ports, occupied ports, and multicast join failures are stable non-retryable errors until configuration changes or the operator explicitly retries.
 - Production HLS output should use disk-backed `shared_previews` storage sized for the expected buffer duration. A small tmpfs preview volume is suitable only for thumbnails or lab use.
 - Automatic failback should be treated carefully. Manual failback avoids stream flapping.
 
@@ -602,30 +695,30 @@ docker compose -f docker-compose-microservices.yml exec -T api python -m pytest 
 
 Show running services:
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml ps
 ```
 
 Follow API logs:
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f api
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml logs -f api
 ```
 
 Follow worker logs:
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f worker-primary
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml logs -f worker-primary
 ```
 
 Stop the stack:
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml down
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml down
 ```
 
 Rebuild:
 
-```powershell
-docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d --build
+```bash
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml up -d --build
 ```

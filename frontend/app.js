@@ -3,6 +3,7 @@ let servicesMap = {};
 let systemNodeRole = "primary";
 let secondaryInterfaceManuallyChanged = false;
 let hydratingRouteEndpoints = false;
+let runtimePolicy = { udp_multicast: { min_port: 1024, max_port: 65535 } };
 let interfaceInventory = [
     { id: "main-video", label: "Main Video", ip: "10.70.15.3", nic: "eno1", zone: "main-video", purpose: "video", node_roles: ["primary", "backup"], directions: ["input", "output"], network: "video" },
     { id: "backup-video", label: "Backup Video", ip: "10.71.15.3", nic: "eno2", zone: "backup-video", purpose: "video", node_roles: ["primary", "backup"], directions: ["input", "output"], network: "video" },
@@ -73,6 +74,32 @@ async function fetchInterfaces() {
     }
 }
 fetchInterfaces();
+
+async function fetchRuntimePolicy() {
+    try {
+        const data = await apiRequest(`${API_URL}/runtime-policy`, {}, "Load runtime policy");
+        if (data?.udp_multicast) runtimePolicy = data;
+    } catch (e) {
+        console.error("Failed to fetch runtime policy; using defaults", e);
+    } finally {
+        applySourcePortPolicy();
+    }
+}
+fetchRuntimePolicy();
+
+function applySourcePortPolicy() {
+    const portInput = document.getElementById("sourcePort");
+    const isMulticast = document.getElementById("sourceProtocol").value === "udp"
+        && document.getElementById("sourceUdpType").value === "multicast";
+    const minimum = isMulticast ? runtimePolicy.udp_multicast.min_port : 1;
+    const maximum = isMulticast ? runtimePolicy.udp_multicast.max_port : 65535;
+    portInput.min = String(minimum);
+    portInput.max = String(maximum);
+    portInput.setCustomValidity("");
+    if (portInput.value && (Number(portInput.value) < minimum || Number(portInput.value) > maximum)) {
+        portInput.setCustomValidity(`Source port must be between ${minimum} and ${maximum}.`);
+    }
+}
 
 async function fetchServices() {
     try {
@@ -234,14 +261,19 @@ function appendInterfaceOptions(select, options) {
         group.label = zoneLabel(zone);
         items.forEach(item => {
             const option = document.createElement("option");
-            option.value = item.ip;
+            option.value = routeInterfaceOptionValue(item);
             option.dataset.interfaceId = item.id || "";
+            option.dataset.bindIp = item.ip || "";
             option.dataset.zone = interfaceZone(item);
             option.textContent = interfaceLabel(item);
             group.appendChild(option);
         });
         select.appendChild(group);
     });
+}
+
+function routeInterfaceOptionValue(item) {
+    return item.id || item.ip || "";
 }
 
 function zoneLabel(zone) {
@@ -284,10 +316,12 @@ function populateInterfaceSelect(selectId, role, direction, selectedIp = "") {
     select.value = selectedIp || "";
 }
 
-function populateRouteInterfaceSelect(selectId, direction, selectedIp = "") {
+function populateRouteInterfaceSelect(selectId, direction, selectedIp = "", selectedInterfaceId = "") {
     const select = document.getElementById(selectId);
     if (!select) return;
     const options = matchingRouteInterfaces(direction);
+    const selectedInventory = options.find(item => item.id && item.id === selectedInterfaceId)
+        || options.find(item => item.ip === selectedIp);
     select.innerHTML = "";
 
     const emptyOption = document.createElement("option");
@@ -297,15 +331,16 @@ function populateRouteInterfaceSelect(selectId, direction, selectedIp = "") {
 
     appendInterfaceOptions(select, options);
 
-    if (selectedIp && !options.some(item => item.ip === selectedIp)) {
+    if (selectedIp && !selectedInventory) {
         const preserved = document.createElement("option");
-        preserved.value = selectedIp;
-        preserved.dataset.interfaceId = "";
+        preserved.value = selectedInterfaceId || selectedIp;
+        preserved.dataset.interfaceId = selectedInterfaceId || "";
+        preserved.dataset.bindIp = selectedIp;
         preserved.textContent = `Existing interface (${selectedIp})`;
         select.appendChild(preserved);
     }
 
-    select.value = selectedIp || "";
+    select.value = selectedInventory ? routeInterfaceOptionValue(selectedInventory) : (selectedInterfaceId || selectedIp || "");
 }
 
 function populateAllInterfaceSelects(config = {}) {
@@ -325,7 +360,7 @@ function getSelectedInterface(selectId) {
     if (!select) return { bind_ip: null, interface_id: null };
     const selected = select.options[select.selectedIndex];
     return {
-        bind_ip: select.value || null,
+        bind_ip: selected?.dataset?.bindIp || select.value || null,
         interface_id: selected?.dataset?.interfaceId || null
     };
 }
@@ -396,7 +431,7 @@ function hydrateRouteEndpoint(prefix, endpoint = {}, fallback = {}) {
     };
     const fields = fieldMap[prefix];
     const bindIp = endpoint.bind_ip || fallback.bind_ip || "";
-    populateRouteInterfaceSelect(fields.interfaceId, fields.direction, bindIp);
+    populateRouteInterfaceSelect(fields.interfaceId, fields.direction, bindIp, endpoint.interface_id || fallback.interface_id || "");
     document.getElementById(fields.addressId).value = endpoint.address || fallback.address || "";
     document.getElementById(fields.portId).value = endpoint.port || fallback.port || "";
 }
@@ -406,15 +441,20 @@ function populateRouteEndpointSelects(config = {}) {
     const destination = firstEnabledDestination(config.destinations || []) || {};
     const destinationEndpoint = destination.primary_endpoint || {};
     const secondaryEndpoint = destination.path_redundancy?.secondary_endpoint || {};
-    populateRouteInterfaceSelect("sourceInterface", "input", sourceEndpoint.bind_ip || getExplicitInputBind(config, "primary"));
-    populateRouteInterfaceSelect("destinationInterface", "output", destinationEndpoint.bind_ip || getExplicitOutputBind(config, "primary"));
-    populateRouteInterfaceSelect("destinationSecondaryInterface", "output", secondaryEndpoint.bind_ip || getExplicitOutputBind(config, "backup"));
+    populateRouteInterfaceSelect("sourceInterface", "input", sourceEndpoint.bind_ip || getExplicitInputBind(config, "primary"), sourceEndpoint.interface_id || "");
+    populateRouteInterfaceSelect("destinationInterface", "output", destinationEndpoint.bind_ip || getExplicitOutputBind(config, "primary"), destinationEndpoint.interface_id || "");
+    populateRouteInterfaceSelect("destinationSecondaryInterface", "output", secondaryEndpoint.bind_ip || getExplicitOutputBind(config, "backup"), secondaryEndpoint.interface_id || "");
 }
 
 function selectedRouteInterface(selectId) {
     const select = document.getElementById(selectId);
     if (!select?.value) return null;
-    return interfaceInventory.find(item => item.ip === select.value) || null;
+    const selected = select.options[select.selectedIndex];
+    const interfaceId = selected?.dataset?.interfaceId || "";
+    const bindIp = selected?.dataset?.bindIp || select.value;
+    return interfaceInventory.find(item => item.id && item.id === interfaceId)
+        || interfaceInventory.find(item => item.ip === bindIp)
+        || null;
 }
 
 function pairedZone(zone) {
@@ -435,7 +475,7 @@ function applyPairedSecondaryInterfaceDefault() {
     const paired = defaultPairedOutputInterface(selectedRouteInterface("destinationInterface"));
     if (!paired) return;
     hydratingRouteEndpoints = true;
-    populateRouteInterfaceSelect("destinationSecondaryInterface", "output", paired.ip);
+    populateRouteInterfaceSelect("destinationSecondaryInterface", "output", paired.ip, paired.id || "");
     hydratingRouteEndpoints = false;
 }
 
@@ -664,6 +704,7 @@ function setRouteEditorVisibility() {
     document.getElementById("sourceIp").required = !sourceIsHls;
     document.getElementById("sourcePort").required = !sourceIsHls;
     document.getElementById("sourceUrl").required = sourceIsHls;
+    applySourcePortPolicy();
 
     document.getElementById("normalDestinationFields").style.display = normalDestinationEnabled ? "block" : "none";
     document.querySelectorAll(".destination-raw-field").forEach(el => {
@@ -1081,6 +1122,7 @@ function closeModal(id) {
 
 [
     "sourceProtocol",
+    "sourceUdpType",
     "sourceStreamIdMode",
     "destinationBuilderProtocol",
     "destinationMode",
@@ -1090,6 +1132,8 @@ function closeModal(id) {
     "enableHlsPreview",
     "enableFullHls"
 ].forEach(id => document.getElementById(id).addEventListener("change", setRouteEditorVisibility));
+
+document.getElementById("sourcePort").addEventListener("input", applySourcePortPolicy);
 
 document.getElementById("enableFullHls").addEventListener("change", setHlsControlVisibility);
 
@@ -1122,6 +1166,8 @@ document.getElementById("destinationBuilderProtocol").addEventListener("change",
 
 document.getElementById("serviceForm").addEventListener("submit", async (e) => {
     e.preventDefault();
+    applySourcePortPolicy();
+    if (!e.currentTarget.reportValidity()) return;
     const id = document.getElementById("serviceId").value;
     const isEdit = !!id;
 

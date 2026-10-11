@@ -18,10 +18,14 @@ services:
   redis:
     image: redis:alpine
     profiles: ["local-state"]
-    command: redis-server --appendonly yes
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    ports:
+      - "${REDIS_BIND_IP:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     restart: always
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,7 +46,9 @@ services:
       - "${API_BIND_IP:-10.75.51.40}:8000:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://srt_user:srt_pass@db:5432/srt_db}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_URL=${REDIS_URL:?REDIS_URL is required}
+      - UDP_MULTICAST_PORT_MIN=${UDP_MULTICAST_PORT_MIN:-1024}
+      - UDP_MULTICAST_PORT_MAX=${UDP_MULTICAST_PORT_MAX:-65535}
       - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
       - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
       - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
@@ -60,11 +66,12 @@ services:
       redis:
         condition: service_healthy
         required: false
-    ports:
-      - "${PRIMARY_VIDEO_IP:-10.70.15.3}:${PRIMARY_PORT_RANGE:-9000-9010}:9000-9010/udp"
+    network_mode: host
     environment:
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - WORKER_REDIS_URL=${WORKER_REDIS_URL:?WORKER_REDIS_URL is required}
       - NODE_ROLE=primary
+      - UDP_MULTICAST_PORT_MIN=${UDP_MULTICAST_PORT_MIN:-1024}
+      - UDP_MULTICAST_PORT_MAX=${UDP_MULTICAST_PORT_MAX:-65535}
       - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
       - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
       - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
@@ -81,11 +88,12 @@ services:
       redis:
         condition: service_healthy
         required: false
-    ports:
-      - "${BACKUP_VIDEO_IP:-10.71.15.3}:${BACKUP_PORT_RANGE:-9000-9010}:9000-9010/udp"
+    network_mode: host
     environment:
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - WORKER_REDIS_URL=${WORKER_REDIS_URL:?WORKER_REDIS_URL is required}
       - NODE_ROLE=backup
+      - UDP_MULTICAST_PORT_MIN=${UDP_MULTICAST_PORT_MIN:-1024}
+      - UDP_MULTICAST_PORT_MAX=${UDP_MULTICAST_PORT_MAX:-65535}
       - MAX_FULL_HLS_SERVICES=${MAX_FULL_HLS_SERVICES:-2}
       - HLS_MIN_FREE_BYTES=${HLS_MIN_FREE_BYTES:-1000000000}
       - HLS_STORAGE_QUOTA_BYTES=${HLS_STORAGE_QUOTA_BYTES:-0}
@@ -103,7 +111,7 @@ services:
         condition: service_healthy
         required: false
     environment:
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_URL=${REDIS_URL:?REDIS_URL is required}
       - PYTHONUNBUFFERED=1
 
   prometheus:
@@ -125,7 +133,7 @@ services:
       - "${GRAFANA_BIND_IP:-10.75.15.3}:4000:3000"
       - "${GRAFANA_ALT_BIND_IP:-10.75.51.40}:4000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning

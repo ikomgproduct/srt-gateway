@@ -281,9 +281,58 @@ Architecture direction:
 - Management must not appear as a media route endpoint.
 - DMZ Video must be selectable for input and output on both primary and backup workers.
 - Main Video and Backup Video should pair as internal redundant paths.
-- Production compose should support env-configurable worker UDP publishing across the required video IPs and port ranges.
-- `docker-compose.production.video-zones.yml` is the explicit optional override for publishing worker UDP ports on DMZ Video in addition to the base internal video bindings.
+- Production workers use host networking; interface inventory and multicast policy bounds remain env-configurable without Docker worker port publication.
+- `docker-compose.production.video-zones.yml` is a one-release no-op compatibility file after the host-network migration.
 - Direct DMZ bind support for UI/Grafana may remain for the current deployment, but Redis/Postgres must not be exposed to DMZ. A DMZ reverse proxy to management-bound services remains the safer future pattern.
+
+## Dynamic UDP Multicast Intake
+
+Product now requires each UDP multicast service to select one multicast group, one permitted video interface, and one source port in the administrator-approved range `1024-65535`.
+
+Former bridge-network limitation addressed by this release:
+
+- The API/UI accepts a per-service source port, but production Compose publishes only container ports `9000-9010`.
+- Changing only `PRIMARY_PORT_RANGE` or `BACKUP_PORT_RANGE` cannot widen the container range because Docker host and container range mappings must contain the same number of ports.
+- Publishing `1024-65535/udp` would reserve nearly the complete host UDP namespace, including much of the ephemeral range, and create a large NAT/firewall footprint. API `8000` and Grafana `4000` are TCP and therefore are not direct socket conflicts, but broad UDP publication is still not an acceptable default production design.
+- Docker bridge port publication does not by itself establish correct multicast group membership, IGMP behavior, or concurrent primary/backup reception.
+
+Selected architecture:
+
+- Production worker containers use Linux `network_mode: host`; API, Redis, Postgres, telemetry, Prometheus, and Grafana remain on their existing bridge/control-plane networks.
+- Worker `ports:` mappings are removed. FFmpeg binds only the configured source port directly on the selected host video interface.
+- Host networking is selected because the Linux deployment already assigns the required Main Video, Backup Video, DMZ Video, and Management addresses to the host. Macvlan/ipvlan is deferred because it requires additional per-container IPs, switch support, and a larger interface-inventory migration.
+- The optional `docker-compose.production.video-zones.yml` override is retained as an empty compatibility file for one release; explicit media-port publication is no longer required.
+- `WORKER_REDIS_URL` is separate from bridge-internal `REDIS_URL`. Single-server workers use an authenticated Redis endpoint published only on loopback; multi-server workers use an authenticated, firewall-restricted Management address.
+- Postgres remains Docker-internal for single-server deployments or Management-only for multi-server control-plane use.
+
+Multicast runtime contract:
+
+- Structured `source.primary_endpoint.address` is the multicast group and `source.primary_endpoint.port` is the sender-facing port. Flat `source_ip` and `source_port` remain compatibility fallbacks.
+- Input binding precedence is role-specific `node_bindings[role].input_bind_ip`, then `source.primary_endpoint.bind_ip`, then legacy `local_bind_ip`.
+- FFmpeg multicast input uses `localaddr=<resolved-bind-ip>` and `reuse=1`. Release still requires real same-host primary/backup validation.
+- The default configurable policy is `UDP_MULTICAST_PORT_MIN=1024` and `UDP_MULTICAST_PORT_MAX=65535`.
+- The API validates IPv4 multicast addressing, allowed port range, media-interface eligibility, and configured conflicts. The worker repeats bind-IP and range validation before starting FFmpeg.
+- In the first release, different service IDs cannot share the same resolved `(bind_ip, source_port)`, even when multicast groups differ. The same service may run on both workers when its target/HA mode intentionally starts both.
+- Active/passive semantics remain unchanged: only the lease owner starts FFmpeg.
+
+Failure behavior:
+
+- Worker state exposes stable error codes for invalid multicast address, invalid bind interface, out-of-policy port, port in use, and multicast join failure.
+- Non-retryable configuration/bind errors do not enter the watchdog restart loop. A service edit or explicit operator start clears the hold and retries once.
+- No database migration is required; the structured source endpoint already stores interface identity, bind IP, group address, and port.
+
+The Product Lead handoff is `docs/dynamic-multicast-port-product-handoff.md`. The Architect-to-Dev-Lead handoff is `docs/dynamic-multicast-port-architect-handoff.md`.
+
+### Reviewer Follow-Up Architecture
+
+The post-QA Reviewer corrections are defined in `docs/dynamic-multicast-port-review-architect-handoff.md`.
+
+- Multicast group, port, endpoint identity, and per-role binding validity apply to enabled and disabled payloads; only bind-conflict admission is deferred for disabled templates.
+- `target_node: all` always validates primary and backup, independent of the current `node_bindings` keys.
+- Structured endpoint `interface_id` resolves an exact inventory entry and must match its submitted endpoint bind IP; role-specific runtime bind IPs are then validated separately for video/input/role eligibility.
+- Enabled multicast check-and-commit operations are serialized with an API-local async lock and a PostgreSQL transaction advisory lock. SQLite tests use the local lock; no schema migration is required.
+- Direct DMZ API/UI and Grafana binding remains permitted for the private VPN-only site DMZ with mandatory firewall restriction. Production Grafana requires an explicit administrator password.
+- Current documentation must describe host-network workers as the active production model and remove obsolete fixed-port publication guidance.
 
 ## HLS Architecture
 
@@ -332,7 +381,8 @@ Guardrails:
   - primary worker: `primary-worker`
   - backup worker: `backup-worker`
 - Do not overwrite server-local `docker-compose-microservices.yml` without explicit approval.
-- Bind API/UI and Grafana only to management IPs.
+- Current production examples bind API/UI and Grafana to explicit operator-facing IPs through env variables; direct DMZ binds may remain for current operations.
+- Future hardening should prefer a DMZ reverse proxy to management-bound API/UI and Grafana.
 - Keep Redis/Postgres internal for single-server deployments.
 - Expose Redis/Postgres on management network only when multi-server HA requires it.
 - Production preview/HLS storage is selected with `PREVIEW_STORAGE`; named volume `shared_previews` is suitable for single-server, while multi-server requires a real shared filesystem path.
@@ -357,7 +407,7 @@ Important coverage areas:
 - Worker routing and active/passive targeting.
 - Legacy `StreamManager` node-role propagation into FFmpeg command building.
 
-Last verified result after API image rebuild and installing `requirements-test.txt` in the running API container: `79 passed` with no pytest warning summary.
+Current automated results are recorded in the latest implementation and QA reports rather than duplicated here as a stale pass count.
 
 Latest production compose validation rendered successfully for single-server, control-plane, primary-worker, and backup-worker env examples.
 
@@ -368,3 +418,4 @@ Latest production compose validation rendered successfully for single-server, co
 - Manual failback is safer than automatic failback until guarded.
 - UI must avoid implying target binding is the active lease owner.
 - Existing compose passwords and exposed ports must be hardened for production.
+- Arbitrary policy-approved multicast ports are implemented through host-network workers; final release approval still requires the documented real multicast hardware matrix.

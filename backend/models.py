@@ -28,6 +28,20 @@ class HlsOutputs(BaseModel):
     low_res: HlsOutputProfile = Field(default_factory=lambda: HlsOutputProfile(buffer_seconds=10))
     full_res: HlsOutputProfile = Field(default_factory=lambda: HlsOutputProfile(buffer_seconds=3600))
 
+class RuntimeRouteEndpoint(BaseModel):
+    interface_id: Optional[str] = None
+    bind_ip: Optional[str] = None
+    address: str = "0.0.0.0"
+    port: Optional[int] = None
+
+class RuntimeSourceConfig(BaseModel):
+    protocol: str
+    type: Optional[str] = None
+    mode: Optional[str] = None
+    primary_endpoint: Optional[RuntimeRouteEndpoint] = None
+    url: Optional[str] = None
+    path: str = ""
+
 class ServiceConfig(BaseModel):
     id: str
     name: str
@@ -37,6 +51,7 @@ class ServiceConfig(BaseModel):
     source_path: str = "" # for rtmp like /live/stream
     source_url: Optional[str] = None
     source_mode: str = "listener" # listener or caller
+    source: Optional[RuntimeSourceConfig] = None
     
     # Phase 2: Advanced Network & SRT options
     local_bind_ip: Optional[str] = None # For UDP multicast bind or SRT explicit NIC binding

@@ -9,7 +9,7 @@ For your physical server layout:
 - Backup Video: `eno2 / 10.71.15.3`
 - DMZ Video: `eno3 / 10.75.51.40`
 - Management: `eno4 / 10.75.15.3`
-- Monitoring: Grafana `http://10.75.15.3:4000`, Prometheus `http://10.75.15.3:9090`
+- Monitoring: Grafana `http://10.75.15.3:4000` and `http://10.75.51.40:4000`; Prometheus is internal to the production compose by default
 
 ## Opening The UI
 
@@ -223,12 +223,13 @@ For caller mode, enter the remote source IP or hostname.
 
 Enter the input port.
 
-For the production single-server example, the default worker host port ranges are:
+For UDP Multicast, the production policy defaults to:
 
 ```text
-Primary worker: 9000-9010/udp
-Backup worker:  9011-9021/udp
+1024-65535/udp
 ```
+
+The UI reads the active range from `/api/runtime-policy` and validates multicast ports before save. Production workers use Linux host networking, so FFmpeg binds only the selected interface and service port. The host firewall and multicast network must still allow the traffic.
 
 #### HLS Source URL
 
@@ -302,7 +303,7 @@ Backup Video: 10.71.15.3
 DMZ Video:    10.75.51.40
 ```
 
-These route interface choices are different from Docker UDP port publishing. The dropdown controls what FFmpeg uses for binding; compose/env files control which host IPs and UDP port ranges Docker publishes.
+The route interface dropdown controls the host IP FFmpeg uses for binding. Production workers use host networking; Compose no longer publishes a fixed media-port window.
 
 ### Compatibility Notes
 
@@ -665,7 +666,7 @@ Check:
 Command:
 
 ```bash
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml ps
 ```
 
 ### Service Shows Error
@@ -684,8 +685,8 @@ Common causes:
 Check worker logs:
 
 ```bash
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f worker-primary
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f worker-backup
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml logs -f worker-primary
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml logs -f worker-backup
 ```
 
 ### No Preview
@@ -716,11 +717,10 @@ Backup Video: 10.71.15.3
 DMZ Video:    10.75.51.40
 ```
 
-Also verify the selected port is within the exposed range:
+Also verify the selected port is within the runtime policy shown by the UI:
 
 ```text
-Primary worker default: 9000-9010/udp
-Backup worker default:  9011-9021/udp
+Default multicast policy: 1024-65535/udp
 ```
 
 ### UI Not Reachable
@@ -734,8 +734,8 @@ http://10.75.51.40:8000
 Check:
 
 ```bash
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml logs -f api
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml ps
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml logs -f api
 ```
 
 ## Daily Operations Checklist
@@ -753,14 +753,14 @@ After updating the server repository:
 
 ```bash
 git pull --ff-only origin main
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml build
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml ps
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml build
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml up -d
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml ps
 ```
 
 If the Dockerfile was changed and you want a fully fresh build:
 
 ```bash
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml build --no-cache
-sudo docker compose --env-file .env.production.single-server.example -f docker-compose.production.yml up -d
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml build --no-cache
+sudo docker compose --env-file .env.production.single-server.local -f docker-compose.production.yml up -d
 ```

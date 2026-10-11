@@ -12,10 +12,20 @@ def test_hls_copy_uses_config_id():
 def test_frontend_assets_are_versioned_for_release_cache_busting():
     index_html = Path("frontend/index.html").read_text()
 
-    assert 'href="style.css?v=network-zone-routing"' in index_html
-    assert 'src="app.js?v=network-zone-routing"' in index_html
+    assert 'href="style.css?v=dynamic-multicast-ports"' in index_html
+    assert 'src="app.js?v=dynamic-multicast-ports"' in index_html
     assert 'href="style.css"' not in index_html
     assert 'src="app.js"></script>' not in index_html
+
+
+def test_frontend_applies_runtime_multicast_port_policy():
+    app_js = Path("frontend/app.js").read_text()
+
+    assert "/runtime-policy" in app_js
+    assert "min_port: 1024" in app_js
+    assert "max_port: 65535" in app_js
+    assert '"sourceUdpType"' in app_js
+    assert "applySourcePortPolicy" in app_js
 
 
 def test_service_values_are_escaped_before_table_rendering():
@@ -117,9 +127,24 @@ def test_route_interface_options_are_grouped_by_zone():
     assert "function appendInterfaceOptions" in app_js
     assert 'document.createElement("optgroup")' in app_js
     assert "group.label = zoneLabel(zone)" in app_js
+    assert "function routeInterfaceOptionValue" in app_js
+    assert "option.value = routeInterfaceOptionValue(item)" in app_js
     assert '"main-video": "Main Video"' in app_js
     assert '"backup-video": "Backup Video"' in app_js
     assert '"dmz-video": "DMZ Video"' in app_js
+
+
+def test_route_interface_selection_preserves_zone_identity_when_ips_repeat():
+    app_js = Path("frontend/app.js").read_text()
+
+    assert "option.dataset.bindIp = item.ip || \"\";" in app_js
+    assert "option.dataset.interfaceId = item.id || \"\";" in app_js
+    assert "const selectedInventory = options.find(item => item.id && item.id === selectedInterfaceId)" in app_js
+    assert "|| options.find(item => item.ip === selectedIp);" in app_js
+    assert "bind_ip: selected?.dataset?.bindIp || select.value || null" in app_js
+    assert "interface_id: selected?.dataset?.interfaceId || null" in app_js
+    assert "interfaceInventory.find(item => item.id && item.id === interfaceId)" in app_js
+    assert "populateRouteInterfaceSelect(\"destinationSecondaryInterface\", \"output\", paired.ip, paired.id || \"\")" in app_js
 
 
 def test_path_redundancy_pairing_defaults_are_scoped_to_route_paths():

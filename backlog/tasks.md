@@ -1,6 +1,90 @@
 # SRT Gateway Backlog
 
-## Current Priority: Network-Zone Architecture Planning
+## Current Priority: Dynamic UDP Multicast Intake Architecture
+
+### 13. Architect Dynamic Multicast Port And Worker Networking Model
+
+Status: QA Software Pass - Physical Release Gates Pending
+
+Goal:
+
+- Allow an operator to configure a UDP multicast source on any administrator-permitted port from `1024-65535` without statically publishing the entire UDP range through Docker bridge/NAT.
+
+Requirements:
+
+- Use `docs/dynamic-multicast-port-product-handoff.md` as the Product Lead handoff.
+- Preserve per-service selection of multicast group, source interface, and source port.
+- Support Main Video, Backup Video, and DMZ Video; exclude Management from media selection.
+- Cover single-server HA with two workers and multi-server HA.
+- Compare host networking and macvlan/ipvlan for direct worker media access.
+- Preserve secure Redis/control-plane connectivity on Management and do not expose Redis/Postgres to DMZ.
+- Define port/group/interface conflict rules and startup validation.
+- Determine FFmpeg multicast options required for concurrent primary/backup reception, including whether `reuse=1` is required.
+- Keep SRT/UDP destination behavior and existing structured/flat compatibility contracts stable unless the chosen network model requires an explicit migration.
+
+Acceptance:
+
+- Architect records the selected worker network mode and rejected alternatives with tradeoffs.
+- The plan explains how arbitrary permitted source ports reach FFmpeg without broad unsafe host-port publication.
+- The plan covers API/UI validation, worker runtime behavior, Compose/env migration, rollback, and operational documentation.
+- The plan includes real multicast tests on Main Video, Backup Video, and DMZ Video.
+- The plan tests primary and backup receiving the same multicast group/port where redundancy requires it.
+- Port boundaries `1024` and `65535`, conflicts, invalid interfaces, restart/reconciliation, and single-/multi-server deployment are covered.
+
+Out of scope:
+
+- Dynamic host firewall administration from the UI.
+- Linux Netplan editing.
+- Expanding this change into automatic failback.
+- Claiming that a temporary explicit test-port mapping is production arbitrary-port support.
+
+Architecture decisions:
+
+- Use Linux host networking for production worker containers only; retain bridge networking for control-plane services.
+- Remove worker port publication under the new model and retire `docker-compose.production.video-zones.yml` after validated migration.
+- Add separate authenticated `WORKER_REDIS_URL` connectivity: loopback for single-server and Management-only for multi-server.
+- Use existing structured source endpoint fields and flat compatibility fallbacks; no database migration is required.
+- Resolve input binding from role-specific `node_bindings`, then structured endpoint binding, then legacy binding.
+- Add FFmpeg UDP multicast `localaddr` and `reuse=1` behavior.
+- Reject different service IDs sharing the same resolved input bind IP and port in the first release.
+- Prevent non-retryable bind/configuration errors from entering an endless watchdog recovery cycle.
+- Dev Lead handoff: `docs/dynamic-multicast-port-architect-handoff.md`.
+
+Dev Lead decisions:
+
+- Implement in ordered slices using `docs/dynamic-multicast-port-dev-lead-implementer-instructions.md`.
+- Infer legacy flat UDP multicast when `source_ip` is a multicast address; do not reclassify existing multicast routes as unicast.
+- Enforce configured bind conflicts only for enabled/running-intended services. Disabled templates may overlap until start or enable time.
+- Keep `docker-compose.production.video-zones.yml` as a documented no-op compatibility file for one release so old deployment commands do not fail immediately.
+- Redis authentication is production-compose scope. Existing lab/legacy compose files remain unchanged in this task.
+- Non-retryable worker errors require a configuration fingerprint so normal reconciliation does not restart the same invalid configuration; edits and explicit starts may retry.
+
+Reviewer follow-up:
+
+- Product Lead handoff: `docs/dynamic-multicast-port-review-product-handoff.md`.
+- Validate both primary and backup execution paths for multicast services targeting `all`.
+- Validate exact interface identity when supplied so Management cannot pass through duplicate-IP inventory.
+- Apply multicast group, port, and interface validity checks to disabled templates; defer only bind-conflict enforcement.
+- Make enabled bind-claim admission safe under concurrent API requests.
+- Remove obsolete current-production Docker media-port publication guidance.
+- Treat API/UI and Grafana access as private-DMZ, VPN-only, and firewall-restricted for this release; require an explicit production Grafana administrator password.
+- Architect handoff: `docs/dynamic-multicast-port-review-architect-handoff.md`.
+- Use a PostgreSQL transaction advisory lock plus an API-local async lock to protect enabled multicast conflict check-and-commit without a schema migration.
+- Validate structured endpoint identity separately from role-specific binding overrides.
+- Dev Lead implementer handoff: `docs/dynamic-multicast-port-review-dev-lead-implementer-handoff.md`.
+- Preserve legacy `worker_1`/`standalone` IP-based media eligibility while enforcing inventory role membership for production `primary` and `backup` roles.
+- Validate exact structured endpoint identity before separately validating each resolved role-specific runtime binding.
+- Implementer completed deterministic `all` role validation, exact interface identity checks, disabled-template validity, and transaction-safe enabled-claim admission.
+- Production Grafana now requires an explicit administrator password in every profile, and obsolete fixed worker-port guidance is removed.
+- Full reviewer-fix regression reports `148 passed`; all production Compose renders, the missing-password failure check, frontend syntax, and no-cache runtime imports pass.
+- Dev Lead review found no blocking issues and approved QA handoff in `docs/dynamic-multicast-port-review-dev-lead-review.md`.
+- Reviewer-fix software QA passed with `148 passed`, all five production Compose renders, the required Grafana-password failure, a clean no-cache image/import check, live PostgreSQL/Redis lifecycle validation, and a real concurrent PostgreSQL admission test producing one success and one HTTP `422`.
+- Browser QA passed dashboard rendering, source protocol visibility, media-interface filtering, structured multicast route creation, persistence, and display. Destination visibility is partial because SRT Stream ID subfields remain visible for non-SRT protocols. Browser edit hydration remains a target-system manual gate because the available in-app automation could not reliably activate the compact edit control and Chrome automation was unavailable.
+- Final release approval remains pending the physical nine-case multicast matrix, two-worker HA/rejoin and recovery, failure-stability observation, DMZ state-service isolation, and normal-browser create/edit/reload validation. See `docs/dynamic-multicast-port-review-qa-report.md`.
+- Post-QA Reviewer approved production-like Linux hardware QA in `docs/dynamic-multicast-port-post-qa-review.md`.
+- One non-blocking P2 remains before final release: destination SRT Stream ID subfields remain visible for UDP and other non-SRT destination protocols. Gate them by destination protocol and add complete visible-field-set frontend coverage.
+
+## Previous Priority: Network-Zone Architecture Planning
 
 ### 12. Architect Network-Zone Interface And Compose Model
 
@@ -56,7 +140,9 @@ Implementation notes:
 - Product decision: UI labels should group interfaces as Main Video, Backup Video, and DMZ Video for now.
 - Product decision: worker UDP publish IPs and port ranges must be env-configurable.
 - QA added `tests/test_production_network_zone_static.py` to guard the optional DMZ video-zone compose override, split single-server port ranges, four-zone env inventory examples, Management exclusion from media inventory, and operator documentation.
-- QA verification: focused network/API/frontend tests passed with `43 passed`; full regression passed with `90 passed`; production compose renders passed for single-server, control-plane, primary, backup, and video-zone override variants.
+- Initial QA verification before reviewer fixes: focused network/API/frontend tests passed with `43 passed`; full regression passed with `90 passed`; production compose renders passed for single-server, control-plane, primary, backup, and video-zone override variants.
+- Reviewer fixes implemented: route endpoint interface dropdowns now preserve inventory identity separately from `bind_ip` for duplicate/shared-IP zone layouts, and production binding docs now consistently describe current direct DMZ/management UI/Grafana binds with Redis/Postgres internal or management-only.
+- Verification after reviewer fixes: focused frontend/production static tests passed with `26 passed`; full regression passed with `92 passed`; production compose renders still pass for single-server, control-plane, primary, backup, and video-zone override variants.
 
 ## Previous Priority: Route Editor V2 Product And Architecture Planning
 
@@ -444,5 +530,5 @@ Status: Future
 Status: Future
 
 - Keep explicit production compose separate.
-- Bind API/UI and Grafana only to management IPs.
+- Prefer a DMZ reverse proxy to management-bound API/UI and Grafana as future hardening.
 - Keep Redis/Postgres internal for single-server deployment; expose only when required for multi-server HA.

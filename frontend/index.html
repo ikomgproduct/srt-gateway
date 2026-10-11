@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SRT Web Gateway</title>
-    <link rel="stylesheet" href="style.css?v=network-zone-routing">
+    <link rel="stylesheet" href="style.css?v=dynamic-multicast-ports">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -135,7 +135,7 @@
                             </div>
                             <div class="form-group">
                                 <label>Source Port</label>
-                                <input type="number" id="sourcePort" required placeholder="9000">
+                                <input type="number" id="sourcePort" min="1" max="65535" required placeholder="9000">
                             </div>
                         </div>
                         <div class="form-group source-rtmp-field">
@@ -447,7 +447,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=network-zone-routing"></script>
+    <script src="app.js?v=dynamic-multicast-ports"></script>
     <style>
         .form-control-select {
             background: var(--bg-dark);

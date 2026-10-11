@@ -4,6 +4,7 @@ import shutil
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from backend.models import ServiceConfig
+from backend.multicast_policy import is_udp_multicast, resolve_input_bind_ip as resolve_multicast_bind_ip, source_endpoint
 
 
 def _strip_protocol_and_path(value: str) -> str:
@@ -88,6 +89,8 @@ def _node_binding(config: ServiceConfig, node_role: str | None = None):
 
 
 def resolve_input_bind_ip(config: ServiceConfig, node_role: str | None = None) -> str | None:
+    if is_udp_multicast(config):
+        return resolve_multicast_bind_ip(config, node_role)
     binding = _node_binding(config, node_role)
     if binding:
         return binding.input_bind_ip or binding.local_bind_ip or config.local_bind_ip
@@ -118,7 +121,8 @@ def with_output_bind_url(destination_url: str, output_bind_ip: str | None) -> st
 
 
 def build_input_url(config: ServiceConfig, use_backup: bool = False, node_role: str | None = None) -> str:
-    input_ip = config.backup_input_ip if use_backup and config.backup_input_ip else config.source_ip
+    structured_ip, structured_port, _ = source_endpoint(config)
+    input_ip = config.backup_input_ip if use_backup and config.backup_input_ip else structured_ip or config.source_ip
     clean_ip = _strip_protocol_and_path(input_ip)
     input_bind_ip = resolve_input_bind_ip(config, node_role)
     protocol = getattr(config.source_protocol, "value", config.source_protocol)
@@ -146,7 +150,9 @@ def build_input_url(config: ServiceConfig, use_backup: bool = False, node_role: 
         params = {"timeout": "5000000"}
         if input_bind_ip:
             params["localaddr"] = input_bind_ip
-        return f"udp://{clean_ip}:{config.source_port}?{urlencode(params)}"
+        if is_udp_multicast(config):
+            params["reuse"] = "1"
+        return f"udp://{clean_ip}:{structured_port or config.source_port}?{urlencode(params)}"
 
     if protocol == "rist":
         prefix = "@" if config.source_mode == "listener" else ""
